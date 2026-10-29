@@ -42,8 +42,8 @@ jobs:
 
       - name: Validate
         working-directory: esphome
-        run: esphome -s mcu_firmware ../mcu/dist/manifest.json config bathroom-mirror-1.yaml
+        run: esphome -s mcu_firmware ../mcu/dist/manifest.json config gl-c-301w.yaml
 
       - name: Compile (BK7238)
         working-directory: esphome
-        run: esphome -s mcu_firmware ../mcu/dist/manifest.json compile bathroom-mirror-1.yaml
+        run: esphome -s mcu_firmware ../mcu/dist/manifest.json compile gl-c-301w.yaml
