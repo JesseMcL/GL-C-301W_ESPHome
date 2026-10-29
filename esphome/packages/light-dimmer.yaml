@@ -1,0 +1,9 @@
+# Light entity for a Dimmer strip. Use with the "Strip type" setting = Dimmer
+# (Set button / DP 113), which routes the channels in the MCU.
+# Wiring: up to five single-colour strips on W, C, B, G, R; all follow W.
+# Unnamed: the entity takes the device's friendly name. Restore mode is the
+# default RESTORE_DEFAULT_OFF, which "Power-on memory" relies on.
+light:
+  - platform: monochromatic
+    id: led_light
+    output: out_w

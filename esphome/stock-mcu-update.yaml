@@ -12,14 +12,14 @@
 #     packet size the stock MCU asked for.
 #  3. Success = the MCU reboots into the new firmware, which talks 115200, so
 #     this config loses it ("did not report the new version" is expected at
-#     9600). Flash bathroom-mirror-1.yaml and it should report the version on
+#     9600). Flash gl-c-301w.yaml and it should report the version on
 #     DP 120.
 #
 # If the stock updater rejects or mangles the image, the MCU may be left
 # without a working app: recover with ICP (mcu/: pio run -e app -t provision).
 
 substitutions:
-  name: bathroom-mirror-1
+  name: gl-c-301w
   friendly_name: Bathroom Mirror
   stock_mcu_baud: "9600"
   mcu_firmware: https://github.com/JesseMcL/GL-C-301W_ESPHome/releases/latest/download/manifest.json

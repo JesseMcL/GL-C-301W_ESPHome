@@ -1,0 +1,15 @@
+# Light entity for a CCT strip. Use with the "Strip type" setting = CCT
+# (Set button / DP 113), which routes the channels in the MCU.
+# Wiring: one strip on C + W; a second one can go on G (C) + B (W), it
+# follows the first.
+# Unnamed: the entity takes the device's friendly name. Restore mode is the
+# default RESTORE_DEFAULT_OFF, which "Power-on memory" relies on.
+light:
+  - platform: cwww
+    id: led_light
+    cold_white: out_c
+    warm_white: out_w
+    # Needed for colour temperature control (otherwise the range is 0-0);
+    # set to the strip's actual whites.
+    cold_white_color_temperature: 6500 K
+    warm_white_color_temperature: 2700 K
