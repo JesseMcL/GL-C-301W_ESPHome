@@ -1,0 +1,6 @@
+mcu/bsp/
+mcu/build/*
+!mcu/build/gl_c_301w_ms51.hex
+!mcu/build/gl_c_301w_ms51.bin
+esphome/.esphome/
+esphome/secrets.yaml
