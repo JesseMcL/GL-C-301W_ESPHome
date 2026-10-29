@@ -22,6 +22,7 @@ Environment:
 """
 import io
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -30,6 +31,11 @@ import tarfile
 USER = os.environ.get("ICP_USER", "pi")
 HOST = os.environ.get("ICP_HOST", "raspberrypi")
 TARGET = "%s@%s" % (USER, HOST) if USER else HOST   # ssh destination
+# USER/HOST come from the environment: reject anything ssh could parse as an
+# option (e.g. "-oProxyCommand=..." would run a local command).
+if not re.fullmatch(r"(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9._:\[\]-]+", TARGET) or TARGET.startswith("-") \
+        or USER.startswith("-"):
+    raise SystemExit("invalid ICP_USER/ICP_HOST: %r" % TARGET)
 PY = os.environ.get("ICP_PYTHON", "python3")
 RDIR = os.environ.get("ICP_DIR", "gl-c-301w-icp")
 LIBRARY = os.environ.get("ICP_LIBRARY", "")
@@ -62,7 +68,8 @@ def run_remote(action, scripts_dir, aprom=None, ldrom=None, config=None, mass_er
     d = shlex.quote(RDIR)
     flash = " ".join(shlex.quote(x) for x in [PY, "-u", RDIR + "/pi_flash.py", *args])
     remote = "mkdir -p %s && tar -xf - -C %s && %s" % (d, d, flash)
-    return subprocess.run(["ssh", TARGET, remote], input=buf.getvalue()).returncode
+    # "--" ends ssh's option parsing before the destination
+    return subprocess.run(["ssh", "--", TARGET, remote], input=buf.getvalue()).returncode
 
 
 if __name__ == "SCons.Script":
