@@ -30,7 +30,7 @@ void TuyaMcuUpdate::setup() {
       return;
     if (this->update_info_.current_version != dp.value_string)
       ESP_LOGI(TAG, "MCU firmware version: %s", dp.value_string.c_str());
-    this->update_info_.current_version = dp.value_string;
+    this->update_info_.current_version = dp.value_string;  // also shown by the version text sensor
     if (this->phase_ == Phase::VERIFY) {
       if (dp.value_string != this->fw_version_)
         return;  // e.g. bootloader "0.0.0": keep waiting until the timeout
@@ -63,15 +63,13 @@ void TuyaMcuUpdate::dump_config() {
 void TuyaMcuUpdate::refresh_state_() {
   if (this->phase_ != Phase::IDLE)
     return;
+  // No firmware bundled: never publish, so the entity has no state and Home
+  // Assistant shows it as unknown. (HA derives "update available" from the
+  // installed vs latest strings, and there is no honest "latest" to report.)
+  if (this->fw_ == nullptr)
+    return;
   update::UpdateState st;
-  if (this->fw_ == nullptr) {
-    // Home Assistant decides "update available" by comparing the installed and
-    // latest version strings, so mirror the installed one: nothing to offer.
-    this->update_info_.latest_version = this->update_info_.current_version;
-    this->update_info_.summary = "No MCU firmware bundled in this build (release manifest "
-                                 "was not available when ESPHome was compiled).";
-    st = update::UPDATE_STATE_NO_UPDATE;
-  } else if (this->update_info_.current_version.empty() || this->update_info_.current_version != this->fw_version_) {
+  if (this->update_info_.current_version.empty() || this->update_info_.current_version != this->fw_version_) {
     // unknown version (e.g. stock firmware) also counts as installable
     st = update::UPDATE_STATE_AVAILABLE;
   } else {
