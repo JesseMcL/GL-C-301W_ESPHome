@@ -2,18 +2,22 @@
 # through the stock firmware's own Tuya MCU upgrade (0x0A / 0x0B), i.e.
 # without catching the chip with ICP at power-on.
 #
-# The light is driven with the stock datapoints so the controller stays usable
-# while you try. The MCU firmware update entity shows "installable" because
-# the stock MCU doesn't report DP 120 (version unknown).
+# The light is driven with the stock datapoints (stock MCU UART: 9600) so the
+# controller stays usable while you try. The stock MCU has no version DP, so
+# the installed version shows as unknown and the update counts as available.
 #
 #  1. Flash this to the T1-U. Watch the log (VERBOSE for tuya + tuya_mcu_dfu).
-#     If "MCU restarted" never appears, the stock MCU isn't at 9600: try 115200.
 #  2. Press Install on "MCU firmware". Look for "MCU accepted update" and the
 #     packet size the stock MCU asked for.
 #  3. Success = the MCU reboots into the new firmware, which talks 115200, so
-#     this config loses it ("did not report the new version" is expected at
-#     9600). Flash gl-c-301w.yaml and it should report the version on
-#     DP 120.
+#     this config can't see it: the product-information check times out and
+#     the update reports failure (expected at 9600). Flash gl-c-301w.yaml; the
+#     MCU should then report its version on DP 120.
+#
+# Only the stock updater's target area (probably APROM) changes: the stock
+# LDROM, its size and CONFIG (locked, reset pin off) stay as they are. This
+# repo's app expects an LDROM of at most 3 KB (its settings page is at
+# 0x7300); see README section 7.
 #
 # If the stock updater rejects or mangles the image, the MCU may be left
 # without a working app: recover with ICP (mcu/: pio run -e app -t provision).
@@ -92,7 +96,7 @@ update:
     uart_id: mcu_uart
     source: ${mcu_firmware}
     chip_family: MS51FC0AE
-    version_datapoint: 120
+    # no version_datapoint: the stock MCU has none
     # stock firmware may be slow to answer while it erases flash
     start_timeout: 15s
     packet_timeout: 10s

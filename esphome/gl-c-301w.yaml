@@ -254,8 +254,13 @@ update:
     name: MCU firmware
     tuya_id: mcu
     uart_id: mcu_uart
+    # BK72xx has no http_request: the image is bundled when ESPHome compiles.
+    # Rebuild ESPHome to pick up a new MCU release.
+    fetch: build
     source: ${mcu_firmware}
     chip_family: MS51FC0AE
+    # Installed version for Home Assistant. After an update the new version
+    # is checked in the MCU's product information first, then on this DP.
     version_datapoint: 120
 
 sensor:

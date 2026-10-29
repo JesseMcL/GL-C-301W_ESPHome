@@ -18,9 +18,11 @@ Open firmware for the **Gledopto GL-C-301W** Wi-Fi 5-in-1 LED controller:
                                     CRC-checked app, rescue mode
 ```
 
-> Status: the firmware builds, the host tests pass, and an end-to-end
-> ESPHome ↔ MCU update was tested against a simulator (see [Verification](#verification)).
-> The MS51 register-level code has **not run on hardware yet**.
+> Status: ESPHome and the MS51 firmware run on the device, and MCU updates
+> from ESPHome through the LDROM bootloader work on hardware, using
+> [esphome_tuya_mcu_dfu](https://github.com/JesseMcL/esphome_tuya_mcu_dfu).
+> Not done: replacing the **stock** MCU firmware over the air (§7), and the
+> 2.4 GHz RF remote. See [Verification](#verification).
 
 ---
 
@@ -67,9 +69,9 @@ UART1 (P10/P11) is used both for flashing the T1 and for the MCU link.
 
 All five drivers sit on independent PWM0 channels CH0–CH4.
 
-### 2.4 GHz RF IC (unmarked, 16 pins)
+### 2.4 GHz RF IC (unmarked, SSOP16)
 
-The RF IC has a 12 MHz crystal (pins 6/7), the antenna on pin 10, and VDD_PA-style decoupling on pins 8/11. Six signal lines go to the MCU (1, 2, 4, 13, 14, 16). This looks like an LT8900/PL1167-class transceiver (SPI + RESET + PKT), as used by the Gledopto RF remotes. **The remote is not supported yet.**
+The RF IC has a 12 MHz crystal (pins 6/7), the antenna on pin 10, and VDD_PA-style decoupling on pins 8/11. Six signal lines go to the MCU (1, 2, 4, 13, 14, 16). This looks like an LT8900-class transceiver (SPI + RESET + PKT), as used by the Gledopto RF remotes. **The remote is not supported yet.**
 
 ### Test pads
 
@@ -101,6 +103,7 @@ These come from the T1 flash dumps taken before and after pairing (ltchiptool), 
   | 33 | `power_memory` |
   | 34 | `do_not_disturb` |
 
+- The stock MCU talks TuyaMCU at **9600 baud**. The app shows MCU v1.0.0 and offers no MCU update, so there's no official MCU image to obtain.
 - The MS51 ships **security-locked** with the **reset pin disabled** (CONFIG0.RPD = 0). Its firmware can't be read, and ICP entry only works by catching the chip at power-on.
 - The dumps contain the Tuya local key and Wi-Fi credentials, so they are **not** part of this repo.
 
@@ -219,6 +222,8 @@ The version comes from git: tag `v1.2.3` gives `1.2.3`, otherwise `dev-<sha>`. T
 | 115 | bool | w | 1 = reset the settings above to defaults (always reads 0) |
 | 120 | string | ro | firmware version. The bootloader reports `0.0.0` |
 
+The version is also in the product information (`0x01` reply, `"v"`), which is what the DFU component checks first after an update. The bootloader answers with `0.0.0-dev`.
+
 "Saved" settings are written to the settings page 2 s after the last change, while the UART is idle (a flash erase stalls the CPU for a few ms).
 
 **PWM frequency.** 600 Hz–8 kHz as in the stock firmware, default 1 kHz (24000 counts, about 14.5 bits). At low duty the MOSFET gate drive needs a few µs to switch on. Lower frequencies make each pulse longer, so dim levels become visible. Higher frequencies can quieten whining power supplies, but with a bigger dead zone at the bottom.
@@ -250,8 +255,9 @@ When the T1 is unreachable, the MCU handles the power button itself: click toggl
 2. The app stores the size in XRAM and software-resets into LDROM.
 3. The bootloader sees `AUXR1.SWRF` and replies `0x0A [0x00 = 256-byte packets]`.
 4. Each `0x0B [offset][256 B]` packet is written and verified, then acknowledged. The first packet erases the validity record, so the old app counts as invalid from that point.
-5. The end packet triggers a check of the footer and CRC. The bootloader then writes the record and resets into the new app. The app reports its version on DP 120.
-6. If the update is interrupted or bad, the chip stays in the bootloader (rescue mode). Rescue mode still answers TuyaMCU init and reports `0.0.0`, so ESPHome offers the update again. If the app asks for an update but nothing arrives within 15 s, the bootloader goes back to the old app.
+5. The end packet triggers a check of the footer and CRC. The bootloader then writes the record and resets into the new app.
+6. ESPHome asks for product information (`0x01`) until the new app answers with the new version. It falls back to DP 120 once `tuya:` has re-initialised.
+7. If the update is interrupted or bad, the chip stays in the bootloader (rescue mode). Rescue mode still answers TuyaMCU init and reports `0.0.0`, so ESPHome offers the update again. If the app asks for an update but nothing arrives within 15 s, the bootloader goes back to the old app.
 
 ### CONFIG profiles (`mcu/config/`)
 
@@ -278,29 +284,46 @@ Set `ICP_HOST` (default `raspberrypi`), `ICP_USER` (default `pi`; set it empty t
 
 `esphome/gl-c-301w.yaml` is the whole device. The light is an RGBCCT (`rgbww`) light; for other strips change its platform and keep `id: rgbcw_light` (the comment above the light lists the options). The `min_power` substitution maps 0 % to the level where the strip just starts to glow. The YAML uses ESPHome actions only, no lambdas.
 
+Both external components come from GitHub. When working on `tuya_mcu` locally, switch to the commented `type: local` source in the YAML.
+
 Two external components:
 
 - **`output: platform: tuya_mcu`** gives one float output per channel DP, so a normal `cwww`/`rgbww` light can use them. Writes are coalesced and paced (`min_interval`, oldest first), so a 5-channel transition can't flood the request/response UART. The MCU fades between updates using DP 106. Writes are held while `tuya:` is suspended for an MCU update.
-- **`update: platform: tuya_mcu_dfu`** from [esphome_tuya_mcu_dfu](https://github.com/JesseMcL/esphome_tuya_mcu_dfu) (its own repo, usable with any TuyaMCU device) is the **MCU firmware** update entity in Home Assistant. It compares DP 120 with the bundled release and installs it with the standard Tuya MCU upgrade protocol, showing progress. The new version is verified after the MCU reboots. The YAML pulls it from GitHub (`@main`); pin a tag or commit there for reproducible builds.
+- **`update: platform: tuya_mcu_dfu`** from [esphome_tuya_mcu_dfu](https://github.com/JesseMcL/esphome_tuya_mcu_dfu) is the **MCU firmware** update entity in Home Assistant. It lives in its own repo and works with any TuyaMCU device.
+  - It shows the MCU's version from DP 120 and installs the bundled release with the standard Tuya MCU upgrade protocol, showing progress.
+  - After the MCU reboots it checks the new version in the product information, then on DP 120.
+  - The YAML pulls it from GitHub (`@main`); pin a tag or commit there for reproducible builds.
 - Buttons are `binary_sensor: tuya` entities. Power: click → `light.toggle`; hold → a script repeats `light.dim_relative` (±3 % every 50 ms) while the button is down, reversing direction on each hold. The Set button is handled in the MCU and is only reported.
 - Settings: **PWM frequency** and **Status LED mode** are `select: tuya`; **Power-on memory** is a `switch: tuya`; **Reset controller settings** is a template button that writes DP 115. They follow changes made with the Set button.
 - **Power-on memory.** The light uses `restore_mode: RESTORE_DEFAULT_OFF`, which restores the state from before a reboot. With memory off (the stock default), the MCU reports DP 114 = off during the start-up handshake. That fires `on_turn_off` inside a 30 s boot window, which turns the light on. Note that an ESPHome OTA reboot counts as a power-up here too.
 
-**Firmware source.** `http_request` isn't available on BK72xx, so the update entity can't download at runtime. Instead, the image is fetched **when ESPHome compiles**, from `mcu_firmware`:
+**Firmware source.** `tuya_mcu_dfu` can download at runtime with `http_request` (`fetch: runtime`), but `http_request` isn't available on BK72xx. This YAML therefore uses `fetch: build`: the image is fetched **when ESPHome compiles**, from `mcu_firmware`.
 
 - The default is `https://github.com/JesseMcL/GL-C-301W_ESPHome/releases/latest/download/manifest.json`. ESPHome checks the GitHub release page at build time, and the device offers the update when the MCU's version differs.
-- Before the first release exists, use `../mcu/dist/manifest.json`, or `esphome -s mcu_firmware ../mcu/dist/manifest.json run …`. If the URL can't be fetched, the build continues without bundled firmware and logs a warning.
+- For a local MCU build, use `../mcu/dist/manifest.json` (commented in the YAML), or `esphome -s mcu_firmware ../mcu/dist/manifest.json run …`. If the source can't be fetched, the build continues without bundled firmware and logs a warning.
 - To roll out a new MCU release: tag it, then rebuild and OTA ESPHome, then press Install.
 
 The ESPHome version of `tuya:` only resends WIFI_STATE when the Wi-Fi status changes. After an MCU restart its re-init would stall at that step. The MCU firmware sends an unsolicited WIFI_STATE ack and queries `0x2B` to work around this, and the update component pokes a heartbeat after flashing so the re-init happens immediately.
 
-## 7. Experiment: update a stock MCU over the air
+## 7. Experiment: update a stock MCU over the air (untested)
 
-Catching the locked MS51 at power-on is a pain. The alternative is to let the stock Gledopto firmware's own Tuya MCU OTA install this firmware: flash `esphome/stock-mcu-update.yaml` to the T1 and follow the steps at the top of that file.
+Catching the locked MS51 at power-on is a pain. The alternative is to let the stock Gledopto firmware's own Tuya MCU OTA install this firmware: flash `esphome/stock-mcu-update.yaml` to the T1 and follow the steps at the top of that file. It drives the light with the stock DPs at 9600 baud, logs at VERBOSE, and offers **MCU firmware**. The stock MCU has no version DP, so the version shows as unknown and the update counts as available.
 
-- It drives the light with the stock DPs, runs the UART at 9600 (the likely stock rate), logs at VERBOSE, and offers **MCU firmware**. The stock MCU reports no DP 120, so the version shows as unknown and the update counts as available.
-- What's sent is `gl-c-301w-mcu-<ver>.ota.bin`: the raw APROM application plus a 32-byte footer. The app doesn't depend on this repo's bootloader. Under a stock LDROM bootloader, a later `0x0A` resets into *that* bootloader, which may handle updates itself.
-- Unknowns: whether the stock updater accepts the image, where it writes it, and whether it checks anything. If it fails, the MCU may need ICP recovery (`provision`). On success the new app talks at 115200, so switch to `gl-c-301w.yaml`.
+What's sent is `gl-c-301w-mcu-<ver>.ota.bin`: the raw APROM application plus a 32-byte footer. Whether the stock updater accepts it, where it writes it and what it checks is unknown. Tuya defines only the transport, not the image (see the disclaimer in the [DFU component's README](https://github.com/JesseMcL/esphome_tuya_mcu_dfu)). If the update fails, the MCU may need ICP recovery (`provision`). On success the new app talks at 115200, so the experiment config loses it and reports a failed verification; switch to `gl-c-301w.yaml`.
+
+**What a stock update can and can't change.** The stock updater most likely writes only APROM. The stock LDROM, its size and the CONFIG bytes (locked, reset pin disabled) stay as they are, which matters for this firmware:
+
+- The app is laid out for an LDROM of **3 KB or less**: its settings page is at 0x7300 and the validity record at 0x7380. With a 4 KB stock LDROM (APROM ends at 0x6FFF), those addresses fall inside the LDROM. The app would run, but settings and the version record wouldn't be stored.
+- The app's own update path (`0x0A`) resets into whatever is in LDROM. Under a stock LDROM that's the stock bootloader, with unknown behaviour.
+- The power button stays a reset button only if CONFIG0.RPD changes. Under stock CONFIG (RPD = 0) it's a GPIO, as the app expects.
+
+**A possible path (not implemented).** The MS51 can rewrite its own LDROM and CONFIG bytes by IAP from APROM: `IAPUEN.LDUEN` / `CFUEN`, all-CONFIG erase plus byte program, and CONFIG0.LOCK doesn't block IAP. LDROM size is CONFIG1.LDSIZE and takes effect after a reset. So a stage-1 "installer" app sent through the stock updater could:
+
+1. Write this repo's bootloader into LDROM.
+2. Set CONFIG.
+3. Reset into the normal update path.
+
+The risky step is CONFIG: it's erase-all, then program. A power cut in between leaves factory defaults: boot from APROM, no LDROM, unlocked, reset pin enabled. That's still recoverable by ICP, but this needs care and a device you can recover.
 
 ## 8. Releases and CI
 
@@ -320,24 +343,27 @@ git tag v1.0.0 && git push origin v1.0.0
 
 Done:
 
+- **Hardware:**
+  - ESPHome on the BK7238 and the MS51 app and bootloader run on the GL-C-301W.
+  - MCU updates from ESPHome through the bootloader work.
 - **SDCC 4.2 via PlatformIO:** app 8.1 KB of 29.4 KB, bootloader 2.4 KB of 3 KB.
 - **Host tests (Unity), 36 cases:** TuyaMCU init, every DP including the settings DPs, multi-DP frames, clamping, framing errors, and the OTA hand-off. Logic: settings log (round trip, wrap and erase, torn and out-of-range records), PWM periods and the manual's frequency order, and Set gestures (1/2/3 clicks, hold, click then hold). For the bootloader against simulated NOR flash: full update, update from rescue, retransmits, corrupted image, verify failure, size limits, wait timeout, rescue never times out, and the largest possible image (the settings page survives it).
 - **End-to-end** (`esphome/test/run.sh`):
   - ESPHome 2026.10 (host build of this YAML with the real `tuya:`, `tuya_mcu` and `tuya_mcu_dfu`; `run.sh` uses a sibling `esphome_tuya_mcu_dfu` checkout, or `DFU_DIR`, if present) talks over a pty to `mcu/sim`, which runs the real `proto.c` and `boot_core.c`.
   - The light transitions arrive as paced DP writes. The MCU update goes 1.0.0 → 1.1.0 and is verified in about 1 s. A corrupted app (rescue mode) is recovered. A power click turns the light off, and a power hold dims it up from off.
-- **ESPHome build for BK7238** (board `t1-u`) with this component compiles.
+- **ESPHome build for BK7238** (board `t1-u`) with both components compiles.
+- **`esphome_tuya_mcu_dfu`** has its own host tests against a fake TuyaMCU: bundled and downloaded images, verification with and without a version DP, and MD5 rejection.
 - **PlatformIO ICP targets** produce the expected single ssh session (files streamed as tar, then `pi_flash.py`; tested with a dummy ssh).
 
-Not done yet (needs hardware):
+Not done yet:
 
-- MS51 clock trim, PWM (including runtime frequency changes), UART/timer, IAP (app-side settings writes) and CONFIG on silicon.
-- The real BK7238 UART.
-- The stock-MCU experiment.
+- The stock-MCU DFU experiment (§7).
+- RF transceiver.
 
 ## 10. Open items
 
 - RF remote (2.4 GHz IC driver and protocol).
-- Confirm LED polarity (`LED_ACTIVE_LOW`), button polarity, and PWM polarity (`PWM_INVERT_MASK`).
+- Other board revisions: LED polarity (`LED_ACTIVE_LOW`) and PWM polarity (`PWM_INVERT_MASK`) are build options in `config.h`, in case they differ.
 - Stock behaviour not in the manual is guessed: the click gap (400 ms), the strip blink timing.
 
 ## License
