@@ -287,7 +287,7 @@ Done:
   - ESPHome 2026.10 (host build of this YAML with the real `tuya:` and `tuya_mcu`) talks over a pty to `mcu/sim`, which runs the real `proto.c` and `boot_core.c`.
   - The light transitions arrive as paced DP writes. The MCU update goes 1.0.0 → 1.1.0 and is verified in about 1 s. A corrupted app (rescue mode) is recovered. A button press toggles the light.
 - **ESPHome build for BK7238** (board `t1-u`) with this component compiles.
-- **PlatformIO ICP targets** produce the expected ssh/scp/`pi_flash.py` calls (tested with a dummy ssh).
+- **PlatformIO ICP targets** produce the expected single ssh session (files streamed as tar, then `pi_flash.py`; tested with a dummy ssh).
 
 Not done yet (needs hardware):
 
