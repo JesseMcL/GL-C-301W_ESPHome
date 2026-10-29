@@ -237,7 +237,7 @@ When the T1 is unreachable, a short press of the power button toggles the light 
 | `pio run -e app -t icp_status` | device info and CONFIG |
 | `pio run -e app -t icp_release` | release CONFIG |
 
-Set `ICP_HOST` (default `pizero`), `ICP_PYTHON` (Python on the Pi with nuvoprogpy installed) and `ICP_DIR` as needed. `scripts/pi_flash.py` is copied to the Pi and does the work there.
+Set `ICP_HOST` (default `raspberrypi`), `ICP_USER` (default `pi`; set it empty to use your `~/.ssh/config` or login name), `ICP_PYTHON` (Python on the Pi with nuvoprogpy installed) and `ICP_DIR` as needed. `scripts/pi_flash.py` is copied to the Pi and does the work there.
 
 ## 6. ESPHome
 

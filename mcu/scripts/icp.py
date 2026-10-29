@@ -11,7 +11,9 @@ As a PlatformIO extra script it wires up:
 Standalone:  python scripts/icp.py provision --aprom X --ldrom Y --config Z
 
 Environment:
-    ICP_HOST    ssh host of the Pi             (default: pizero)
+    ICP_HOST    ssh host of the Pi             (default: raspberrypi)
+    ICP_USER    ssh user on the Pi             (default: pi; set it empty to
+                                                use ~/.ssh/config / your login)
     ICP_PYTHON  python on the Pi with nuvoprogpy (default: python3)
     ICP_DIR     staging directory on the Pi    (default: gl-c-301w-icp)
 """
@@ -20,7 +22,9 @@ import shlex
 import subprocess
 import sys
 
-HOST = os.environ.get("ICP_HOST", "pizero")
+USER = os.environ.get("ICP_USER", "pi")
+HOST = os.environ.get("ICP_HOST", "raspberrypi")
+TARGET = "%s@%s" % (USER, HOST) if USER else HOST   # ssh/scp destination
 PY = os.environ.get("ICP_PYTHON", "python3")
 RDIR = os.environ.get("ICP_DIR", "gl-c-301w-icp")
 HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else None
@@ -37,11 +41,11 @@ def run_remote(action, scripts_dir, aprom=None, ldrom=None, config=None, mass_er
             args += [opt, RDIR + "/" + os.path.basename(path)]
     if mass_erase:
         args.append("--mass-erase")
-    subprocess.check_call(["ssh", HOST, "mkdir -p " + shlex.quote(RDIR)])
-    subprocess.check_call(["scp", "-q", *files, "%s:%s/" % (HOST, RDIR)])
+    subprocess.check_call(["ssh", TARGET, "mkdir -p " + shlex.quote(RDIR)])
+    subprocess.check_call(["scp", "-q", *files, "%s:%s/" % (TARGET, RDIR)])
     cmd = " ".join(shlex.quote(x) for x in [PY, RDIR + "/pi_flash.py", *args])
     # -t: nuvo51icpy may prompt, and you need to see when to power-cycle
-    return subprocess.call(["ssh", "-t", HOST, cmd])
+    return subprocess.call(["ssh", "-t", TARGET, cmd])
 
 
 if __name__ == "SCons.Script":
