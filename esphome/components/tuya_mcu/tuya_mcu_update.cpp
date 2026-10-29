@@ -65,6 +65,11 @@ void TuyaMcuUpdate::refresh_state_() {
     return;
   update::UpdateState st;
   if (this->fw_ == nullptr) {
+    // Home Assistant decides "update available" by comparing the installed and
+    // latest version strings, so mirror the installed one: nothing to offer.
+    this->update_info_.latest_version = this->update_info_.current_version;
+    this->update_info_.summary = "No MCU firmware bundled in this build (release manifest "
+                                 "was not available when ESPHome was compiled).";
     st = update::UPDATE_STATE_NO_UPDATE;
   } else if (this->update_info_.current_version.empty() || this->update_info_.current_version != this->fw_version_) {
     // unknown version (e.g. stock firmware) also counts as installable
