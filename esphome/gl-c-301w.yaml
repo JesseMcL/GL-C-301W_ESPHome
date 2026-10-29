@@ -25,14 +25,12 @@ substitutions:
   name: gl-c-301w
   friendly_name: Gledopto GL-C-301W
   # 115200 for this repo's MCU firmware. The stock Gledopto MCU firmware
-  # probably talks 9600 - use that to try the update on a stock MCU.
+  # talks 9600 - use that to try the update on a stock MCU.
   mcu_baud: "115200"
   # Release manifest the MCU firmware is bundled from at compile time.
-  # Before the first GitHub release exists, point this at a local build:
-  #   ../mcu/dist/manifest.json
+  # mcu_firmware:  ../mcu/dist/manifest.json
   mcu_firmware: https://github.com/JesseMcL/GL-C-301W_ESPHome/releases/latest/download/manifest.json
-  # Level where the strip just starts to glow (dead zone of the MOSFET gate
-  # drive), e.g. "0.004". 0 = off.
+  # Level where the strip just starts to glow (dead zone of the MOSFET gate drive), e.g. "0.004". 0 = off.
   min_power: "0"
 
 esphome:
@@ -40,12 +38,11 @@ esphome:
   friendly_name: ${friendly_name}
 
 external_components:
-  # paced datapoint outputs (this repo). Once the repo is on GitHub, this
-  # works from anywhere:
-  #   - source: github://JesseMcL/GL-C-301W_ESPHome/esphome/components@main
-  - source:
-      type: local
-      path: components
+  # paced datapoint outputs (this repo).
+  # - source:
+  #     type: local
+  #     path: components
+  - source: github://JesseMcL/GL-C-301W_ESPHome/esphome/components@main
     components: [tuya_mcu]
   # MCU firmware update: https://github.com/JesseMcL/esphome_tuya_mcu_dfu
   - source: github://JesseMcL/esphome_tuya_mcu_dfu@main
