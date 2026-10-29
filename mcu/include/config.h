@@ -20,7 +20,7 @@
 #endif
 
 /* ---- PWM ------------------------------------------------------------- */
-/* PWM0 clocked at Fsys/1. The frequency is a setting (DP 114, Set x2),
+/* PWM0 clocked at Fsys/1. The frequency is a setting (DP 113, Set x2),
  * 600 Hz .. 8 kHz as in the stock firmware, default 1 kHz (24000 counts,
  * ~14.5 bit). See logic.c. */
 /* Bits: 0=R 1=G 2=B 3=C 4=W. Set a bit if that driver is active-low. */
@@ -52,8 +52,12 @@
 
 /* ---- Link supervision / local fallback ------------------------------- */
 #define LINK_TIMEOUT_MS       40000UL
-/* "On" level when there is nothing to restore (per strip type, logic.c) */
-#define LOCAL_DEFAULT_LEVEL   32768U
+/* "On" levels when there is nothing to restore (local control, blinks) */
+#define LOCAL_DEFAULT_R       0
+#define LOCAL_DEFAULT_G       0
+#define LOCAL_DEFAULT_B       0
+#define LOCAL_DEFAULT_C       32768U
+#define LOCAL_DEFAULT_W       32768U
 #define LOCAL_FADE_MS         300
 /* Local dimming: every DIM_STEP_MS the brightest channel moves by 1/32
  * (at least DIM_MIN_STEP), between DIM_MIN_LEVEL and full. */

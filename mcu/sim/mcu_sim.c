@@ -55,14 +55,14 @@ void app_set_led_mode(uint8_t m) { led_mode = m; printf("APP led mode %u\n", m);
 uint8_t app_get_led_mode(void) { return led_mode; }
 void app_set_led(uint8_t l, uint8_t on) { leds[l] = on; printf("APP led %u = %u\n", l, on); fflush(stdout); }
 uint8_t app_get_led(uint8_t l) { return leds[l]; }
-static uint8_t cfgv[3];                 /* strip, freq, memory */
-uint8_t app_get_cfg(uint8_t dp) { return dp < DP_RESET_SETTINGS ? cfgv[dp - DP_STRIP_TYPE] : 0; }
+static uint8_t cfgv[2];                 /* freq, memory */
+uint8_t app_get_cfg(uint8_t dp) { return dp < DP_RESET_SETTINGS ? cfgv[dp - DP_PWM_FREQ] : 0; }
 void app_set_cfg(uint8_t dp, uint8_t v)
 {
     printf("APP cfg dp %u = %u\n", dp, v);
     fflush(stdout);
     if (dp < DP_RESET_SETTINGS)
-        cfgv[dp - DP_STRIP_TYPE] = v;
+        cfgv[dp - DP_PWM_FREQ] = v;
     else if (v)
         memset(cfgv, 0, sizeof cfgv);
 }

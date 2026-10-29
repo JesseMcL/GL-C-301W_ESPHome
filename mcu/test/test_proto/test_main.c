@@ -23,13 +23,13 @@ uint8_t app_get_led_mode(void) { return led_mode; }
 void app_set_led(uint8_t l, uint8_t on) { leds[l] = on; }
 uint8_t app_get_led(uint8_t l) { return leds[l]; }
 uint8_t app_ota_request(uint32_t size) { ota_req = size; ota_calls++; return 0; }
-static uint8_t cfgv[4];                       /* DPs 113..116 */
+static uint8_t cfgv[3];                       /* DPs 113..115 */
 static int resets;
-uint8_t app_get_cfg(uint8_t dp) { return dp == DP_RESET_SETTINGS ? 0 : cfgv[dp - DP_STRIP_TYPE]; }
+uint8_t app_get_cfg(uint8_t dp) { return dp == DP_RESET_SETTINGS ? 0 : cfgv[dp - DP_PWM_FREQ]; }
 void app_set_cfg(uint8_t dp, uint8_t v)
 {
     if (dp == DP_RESET_SETTINGS) { if (v) resets++; return; }
-    cfgv[dp - DP_STRIP_TYPE] = v;
+    cfgv[dp - DP_PWM_FREQ] = v;
 }
 
 /* logic.c is linked into the native build; no flash here */
@@ -158,19 +158,17 @@ static void test_settings_dps(void)
 {
     uint8_t type;
     const uint8_t *v;
-    uint8_t d[] = {DP_STRIP_TYPE, DPT_ENUM, 0, 1, STRIP_CCT,
-                   DP_PWM_FREQ, DPT_ENUM, 0, 1, PWM_FREQ_600,
+    uint8_t d[] = {DP_PWM_FREQ, DPT_ENUM, 0, 1, PWM_FREQ_600,
                    DP_POWER_MEMORY, DPT_BOOL, 0, 1, 1};
     uint8_t r[] = {DP_RESET_SETTINGS, DPT_BOOL, 0, 1, 1};
     uint8_t m[] = {DP_LED_MODE, DPT_ENUM, 0, 1, 7};
 
     TEST_ASSERT_EQUAL(1, send(TCMD_DP_DELIVER, d, sizeof d));
-    TEST_ASSERT_EQUAL(STRIP_CCT, cfgv[0]);
-    TEST_ASSERT_EQUAL(PWM_FREQ_600, cfgv[1]);
-    TEST_ASSERT_EQUAL(1, cfgv[2]);
-    v = t_find_dp(&fr[0], DP_STRIP_TYPE, &type, NULL);
+    TEST_ASSERT_EQUAL(PWM_FREQ_600, cfgv[0]);
+    TEST_ASSERT_EQUAL(1, cfgv[1]);
+    v = t_find_dp(&fr[0], DP_PWM_FREQ, &type, NULL);
     TEST_ASSERT_EQUAL(DPT_ENUM, type);
-    TEST_ASSERT_EQUAL(STRIP_CCT, v[0]);
+    TEST_ASSERT_EQUAL(PWM_FREQ_600, v[0]);
     v = t_find_dp(&fr[0], DP_POWER_MEMORY, &type, NULL);
     TEST_ASSERT_EQUAL(DPT_BOOL, type);
     TEST_ASSERT_EQUAL(1, v[0]);
@@ -182,15 +180,15 @@ static void test_settings_dps(void)
     TEST_ASSERT_EQUAL(0, v[0]);
 
     /* out-of-range LED mode ignored */
-    led_mode = LED_MODE_QUIET;
+    led_mode = LED_MODE_MANUAL;
     send(TCMD_DP_DELIVER, m, sizeof m);
-    TEST_ASSERT_EQUAL(LED_MODE_QUIET, led_mode);
+    TEST_ASSERT_EQUAL(LED_MODE_MANUAL, led_mode);
 }
 
 static void test_report_single_dp(void)
 {
     const uint8_t *v;
-    cfgv[1] = PWM_FREQ_8000;
+    cfgv[0] = PWM_FREQ_8000;
     t_txn = 0;
     proto_report(DP_PWM_FREQ);
     TEST_ASSERT_EQUAL(1, t_frames(fr, 16));

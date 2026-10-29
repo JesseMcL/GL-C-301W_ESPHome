@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end test on a PC: ESPHome (host platform) <-> pty <-> simulated MCU.
+# The ESPHome config is generated from ../gl-c-301w.yaml (make_host_yaml.py).
 #   1. builds MCU firmware 1.0.0 (installed in the simulator) and 1.1.0 (bundled)
 #   2. the host ESPHome turns the light on, then installs the MCU update
 #   3. expects "MCU update to 1.1.0 verified", then a power click (off) and a
@@ -18,6 +19,7 @@ cc -O1 -DPROTO_VERSION_HOOK -I"$ROOT/mcu/include" -I"$ROOT/mcu/src/boot" -o "$WO
 
 socat pty,raw,echo=0,link=/tmp/esptty pty,raw,echo=0,link=/tmp/mcutty &
 sleep 1
+python3 make_host_yaml.py ../gl-c-301w.yaml host-integration.yaml
 esphome compile host-integration.yaml
 "$WORK/mcu_sim" /tmp/mcutty "$WORK/old.icp.bin" --press-power-at 36000 --hold-power-at 38000 > "$WORK/sim.log" &
 sleep 0.3

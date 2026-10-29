@@ -9,7 +9,7 @@ __xdata settings_t cfg;
 /* Settings log                                                       */
 /*                                                                    */
 /* One flash page of 8-byte records, appended in order:               */
-/*   tag 0x5A, strip, freq, memory, led_mode, fade lo, fade hi, check */
+/*   tag 0x5B, freq, memory, led_mode, fade lo, fade hi, 0, check     */
 /* check = ~(sum of the first 7 bytes). The newest valid record wins; */
 /* a torn record fails the check and is skipped. When the page is     */
 /* full it is erased and the log restarts at slot 0 (16 saves per     */
@@ -21,7 +21,6 @@ static __xdata uint8_t rec[SETTINGS_RECORD];
 
 void settings_defaults(void)
 {
-    cfg.strip = STRIP_RGBCCT;
     cfg.freq = PWM_FREQ_1000;
     cfg.memory = 0;
     cfg.led_mode = LED_MODE_AUTO;
@@ -32,12 +31,12 @@ static void encode(void)
 {
     uint8_t i, sum = 0;
     rec[0] = SETTINGS_TAG;
-    rec[1] = cfg.strip;
-    rec[2] = cfg.freq;
-    rec[3] = cfg.memory;
-    rec[4] = cfg.led_mode;
-    rec[5] = (uint8_t)cfg.fade_ms;
-    rec[6] = (uint8_t)(cfg.fade_ms >> 8);
+    rec[1] = cfg.freq;
+    rec[2] = cfg.memory;
+    rec[3] = cfg.led_mode;
+    rec[4] = (uint8_t)cfg.fade_ms;
+    rec[5] = (uint8_t)(cfg.fade_ms >> 8);
+    rec[6] = 0;
     for (i = 0; i < SETTINGS_RECORD - 1; i++)
         sum += rec[i];
     rec[SETTINGS_RECORD - 1] = (uint8_t)~sum;
@@ -57,9 +56,9 @@ static uint8_t slot_valid(void)
     for (i = 0; i < SETTINGS_RECORD - 1; i++)
         sum += rec[i];
     return rec[0] == SETTINGS_TAG && rec[SETTINGS_RECORD - 1] == (uint8_t)~sum &&
-           rec[1] < STRIP_COUNT && rec[2] < PWM_FREQ_COUNT && rec[3] <= 1 &&
-           rec[4] < LED_MODE_COUNT &&
-           (uint16_t)(rec[5] | ((uint16_t)rec[6] << 8)) <= (uint16_t)FADE_MS_MAX;
+           rec[1] < PWM_FREQ_COUNT && rec[2] <= 1 && rec[3] < LED_MODE_COUNT &&
+           (uint16_t)(rec[4] | ((uint16_t)rec[5] << 8)) <= (uint16_t)FADE_MS_MAX &&
+           rec[6] == 0;
 }
 
 static uint8_t slot_empty(void)
@@ -80,11 +79,10 @@ uint8_t settings_load(void)
         if (slot_empty())
             break;
         if (slot_valid()) {
-            cfg.strip = rec[1];
-            cfg.freq = rec[2];
-            cfg.memory = rec[3];
-            cfg.led_mode = rec[4];
-            cfg.fade_ms = (uint16_t)rec[5] | ((uint16_t)rec[6] << 8);
+            cfg.freq = rec[1];
+            cfg.memory = rec[2];
+            cfg.led_mode = rec[3];
+            cfg.fade_ms = (uint16_t)rec[4] | ((uint16_t)rec[5] << 8);
             found = 1;
         }
     }
@@ -145,66 +143,13 @@ uint8_t pwm_freq_flashes(uint8_t freq)
     return freq + 1;
 }
 
-/* ------------------------------------------------------------------ */
-/* Strip type                                                         */
-/* ------------------------------------------------------------------ */
-void strip_map(uint8_t strip, const uint16_t *l, uint16_t *p)
+void default_on(uint16_t *l)
 {
-    uint8_t i;
-    for (i = 0; i < NUM_CH; i++)
-        p[i] = l[i];
-    switch (strip) {
-    case STRIP_RGBW:
-        p[CH_C] = 0;
-        break;
-    case STRIP_RGB:
-        p[CH_C] = 0;
-        p[CH_W] = 0;
-        break;
-    case STRIP_CCT:                     /* second strip: W on B, C on G */
-        p[CH_B] = l[CH_W];
-        p[CH_G] = l[CH_C];
-        p[CH_R] = 0;
-        break;
-    case STRIP_DIMMER:
-        for (i = 0; i < NUM_CH; i++)
-            p[i] = l[CH_W];
-        break;
-    default:
-        break;
-    }
-}
-
-void strip_default_on(uint8_t strip, uint16_t *l)
-{
-    uint8_t i;
-    for (i = 0; i < NUM_CH; i++)
-        l[i] = 0;
-    switch (strip) {
-    case STRIP_RGB:
-        l[CH_R] = l[CH_G] = l[CH_B] = LOCAL_DEFAULT_LEVEL;
-        break;
-    case STRIP_RGBW:
-    case STRIP_DIMMER:
-        l[CH_W] = LOCAL_DEFAULT_LEVEL;
-        break;
-    default:                            /* RGBCCT, CCT: neutral white */
-        l[CH_C] = l[CH_W] = LOCAL_DEFAULT_LEVEL;
-        break;
-    }
-}
-
-static const uint8_t __code strip_col[STRIP_COUNT] = {
-    COLOUR_R | COLOUR_G | COLOUR_B,     /* RGBCCT white  */
-    COLOUR_R | COLOUR_G,                /* RGBW   yellow */
-    COLOUR_B,                           /* RGB    blue   */
-    COLOUR_G,                           /* CCT    green  */
-    COLOUR_R,                           /* Dimmer red    */
-};
-
-uint8_t strip_colour(uint8_t strip)
-{
-    return strip < STRIP_COUNT ? strip_col[strip] : 0;
+    l[CH_R] = LOCAL_DEFAULT_R;
+    l[CH_G] = LOCAL_DEFAULT_G;
+    l[CH_B] = LOCAL_DEFAULT_B;
+    l[CH_C] = LOCAL_DEFAULT_C;
+    l[CH_W] = LOCAL_DEFAULT_W;
 }
 
 /* ------------------------------------------------------------------ */

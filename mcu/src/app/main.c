@@ -261,8 +261,7 @@ static void save_tick(void)
 /* ------------------------------------------------------------------ */
 /* PWM + fading                                                       */
 /* ------------------------------------------------------------------ */
-/* cur/tgt are the logical channels (R,G,B,C,W as ESPHome sets them);
- * strip_map() turns them into the five outputs for the strip type. */
+/* Channel levels R,G,B,C,W: tgt = set point, cur = fading value */
 static __xdata uint16_t tgt[NUM_CH];
 static __xdata uint16_t cur[NUM_CH];
 static __xdata uint16_t phys[NUM_CH];
@@ -300,16 +299,16 @@ static void pwm_apply(void)
     uint8_t i, any = 0;
     uint16_t d0, d1, d2, d3, d4;
 
-    strip_map(cfg.strip, cur, phys);
+    for (i = 0; i < NUM_CH; i++) {
+        phys[i] = cur[i];
+        if (phys[i]) any = 1;
+    }
     if (blink_left && !(blink_left & 1)) {
-        for (i = 0; i < NUM_CH; i++)
-            if (phys[i]) any = 1;
         if (any) {
             for (i = 0; i < NUM_CH; i++)
                 phys[i] = 0;
         } else {
-            strip_default_on(cfg.strip, tmp);
-            strip_map(cfg.strip, tmp, phys);
+            default_on(phys);
         }
     }
 
@@ -472,17 +471,8 @@ static void leds_init(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Settings actions (DPs 113..116 and the Set button)                 */
+/* Settings actions (DPs 113..115 and the Set button)                 */
 /* ------------------------------------------------------------------ */
-static void set_strip(uint8_t s)
-{
-    if (s != cfg.strip) {
-        cfg.strip = s;
-        pwm_dirty = 1;
-        save_request();
-    }
-}
-
 static void set_freq(uint8_t f)
 {
     if (f != cfg.freq) {
@@ -501,7 +491,6 @@ static void factory_reset(void)
 
 static void report_settings(void)
 {
-    proto_report(DP_STRIP_TYPE);
     proto_report(DP_PWM_FREQ);
     proto_report(DP_POWER_MEMORY);
     proto_report(DP_LED_MODE);
@@ -511,7 +500,6 @@ static void report_settings(void)
 uint8_t app_get_cfg(uint8_t dp)
 {
     switch (dp) {
-    case DP_STRIP_TYPE:   return cfg.strip;
     case DP_PWM_FREQ:     return cfg.freq;
     case DP_POWER_MEMORY: return cfg.memory;
     default:              return 0;          /* DP_RESET_SETTINGS reads 0 */
@@ -521,10 +509,6 @@ uint8_t app_get_cfg(uint8_t dp)
 void app_set_cfg(uint8_t dp, uint8_t v)
 {
     switch (dp) {
-    case DP_STRIP_TYPE:
-        if (v < STRIP_COUNT)
-            set_strip(v);
-        break;
     case DP_PWM_FREQ:
         if (v < PWM_FREQ_COUNT)
             set_freq(v);
@@ -550,10 +534,7 @@ void app_set_cfg(uint8_t dp, uint8_t v)
 static void set_gesture(uint8_t g)
 {
     switch (g) {
-    case GEST_CLICK1:                    /* next strip type */
-        set_strip(cfg.strip + 1 >= STRIP_COUNT ? 0 : cfg.strip + 1);
-        proto_report(DP_STRIP_TYPE);
-        break;
+    /* 1 click (stock: strip type) is left to ESPHome via DP 108 */
     case GEST_CLICK2:                    /* next PWM frequency */
         set_freq(pwm_freq_next(cfg.freq));
         ind_flash(pwm_freq_flashes(cfg.freq));
@@ -614,7 +595,7 @@ static void local_power_toggle(void)
     for (i = 0; i < NUM_CH; i++)
         if (saved[i]) any = 1;
     if (!any)
-        strip_default_on(cfg.strip, saved);
+        default_on(saved);
     for (i = 0; i < NUM_CH; i++)
         set_channel_fade(i, saved[i], LOCAL_FADE_MS);
 }
@@ -623,15 +604,16 @@ static void local_power_toggle(void)
 static void local_dim_step(void)
 {
     uint8_t i;
-    uint16_t m = 0, nm, step;
+    uint16_t m = 0, nm, step, dm = 1;
 
     for (i = 0; i < NUM_CH; i++)
         if (tgt[i] > m) m = tgt[i];
     if (m == 0) {                        /* off: start from the bottom */
-        strip_default_on(cfg.strip, tmp);
+        default_on(tmp);
         for (i = 0; i < NUM_CH; i++)
-            set_channel_fade(i, (uint16_t)((uint32_t)tmp[i] * DIM_MIN_LEVEL / LOCAL_DEFAULT_LEVEL),
-                             DIM_STEP_MS);
+            if (tmp[i] > dm) dm = tmp[i];
+        for (i = 0; i < NUM_CH; i++)
+            set_channel_fade(i, (uint16_t)((uint32_t)tmp[i] * DIM_MIN_LEVEL / dm), DIM_STEP_MS);
         return;
     }
     step = m >> 5;
@@ -721,7 +703,7 @@ static uint8_t indicator(uint16_t phase)
         return (phase & 0x80) ? COLOUR_B : 0;                /* blue ~4 Hz: pairing/AP */
     if (proto_wifi_state == 0x02 || proto_wifi_state == WIFI_UNKNOWN)
         return (phase & 0x200) ? COLOUR_G : 0;               /* green ~1 Hz: no Wi-Fi */
-    return cfg.led_mode == LED_MODE_QUIET ? 0 : strip_colour(cfg.strip);
+    return 0;                                                /* connected: dark */
 }
 
 void main(void)

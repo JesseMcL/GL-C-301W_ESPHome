@@ -1,8 +1,25 @@
 # Gledopto GL-C-301W - T1-U-HL (BK7238) running ESPHome, talking TuyaMCU to
 # the MS51FC0AE running this repo's firmware (mcu/).
 #
-# The MCU side (datapoints, buttons, settings, MCU firmware update) is in
-# packages/mcu.yaml; the light entity in packages/light-<strip type>.yaml.
+# MCU datapoints (mcu/include/tuya_dp.h):
+#   101..105 R,G,B,C,W level   value 0..65535    rw
+#   106      fade ms           value 0..10000    rw  (saved in the MCU)
+#   107      power button      bool              ro
+#   108      set button        bool              ro
+#   109      status LED mode   enum 0 auto 1 manual            rw (saved)
+#   110..112 status LED r/g/b  bool              rw  (manual mode)
+#   113      PWM frequency     enum 0 600 1 800 2 1000 3 2000 4 4000 5 8000 Hz (saved)
+#   114      power-on memory   bool              rw  (saved)
+#   115      reset settings    bool, write 1     (reads 0)
+#   120      firmware version  string            ro
+#
+# The MCU handles the Set button as in the Gledopto manual:
+#   2 clicks next PWM frequency     3 clicks power-on memory
+#   hold 3 s reset settings
+# (1 click, strip type in the stock firmware, is free.) The strip type is
+# the light below: change it for your strip. The power button is handled
+# here while ESPHome is up (the MCU takes over when the link is lost):
+# click = on/off, hold = dim, alternating up/down.
 
 substitutions:
   name: gl-c-301w
@@ -14,17 +31,9 @@ substitutions:
   # Before the first GitHub release exists, point this at a local build:
   #   ../mcu/dist/manifest.json
   mcu_firmware: https://github.com/JesseMcL/GL-C-301W_ESPHome/releases/latest/download/manifest.json
-  # Level where the strip just starts to glow, see packages/mcu.yaml:
-  # min_power: "0.004"
-
-packages:
-  mcu: !include packages/mcu.yaml
-  # Pick the one matching the strip (and set "Strip type" to the same):
-  light: !include packages/light-cct.yaml
-  # light: !include packages/light-rgbcct.yaml
-  # light: !include packages/light-rgbw.yaml
-  # light: !include packages/light-rgb.yaml
-  # light: !include packages/light-dimmer.yaml
+  # Level where the strip just starts to glow (dead zone of the MOSFET gate
+  # drive), e.g. "0.004". 0 = off.
+  min_power: "0"
 
 esphome:
   name: ${name}
@@ -69,9 +78,183 @@ uart:
   rx_pin: P10           # T1 pin 16 <- MCU pin 2 (UART0 TXD)
   baud_rate: ${mcu_baud}
 
+tuya:
+  id: mcu
+  uart_id: mcu_uart
+
+# ---- LED driver channels ----------------------------------------------------
+output:
+  - { platform: tuya_mcu, id: out_r, datapoint: 101, min_power: "${min_power}", zero_means_zero: true }
+  - { platform: tuya_mcu, id: out_g, datapoint: 102, min_power: "${min_power}", zero_means_zero: true }
+  - { platform: tuya_mcu, id: out_b, datapoint: 103, min_power: "${min_power}", zero_means_zero: true }
+  - { platform: tuya_mcu, id: out_c, datapoint: 104, min_power: "${min_power}", zero_means_zero: true }
+  - { platform: tuya_mcu, id: out_w, datapoint: 105, min_power: "${min_power}", zero_means_zero: true }
+
+# RGB+CCT strip. For other strips swap the platform, keep id: rgbcw_light
+# (the button scripts use it) and leave unused outputs out:
+#   RGBW: rgbw (white: out_w)   RGB: rgb   CCT: cwww (out_c / out_w)
+#   single colour: monochromatic (output: out_w)
+# Restore mode stays the default RESTORE_DEFAULT_OFF ("Power-on memory").
+light:
+  - platform: rgbww
+    id: rgbcw_light
+    red: out_r
+    green: out_g
+    blue: out_b
+    cold_white: out_c
+    warm_white: out_w
+    # needed for colour temperature control; set to the strip's whites
+    cold_white_color_temperature: 6500 K
+    warm_white_color_temperature: 2700 K
+
+number:
+  - platform: tuya
+    name: Channel smoothing
+    number_datapoint: 106
+    min_value: 0
+    max_value: 1000
+    step: 10
+    unit_of_measurement: ms
+    mode: box
+    entity_category: config
+
+# ---- Buttons on the controller ---------------------------------------------
+binary_sensor:
+  - platform: tuya
+    id: btn_power
+    name: Power button
+    sensor_datapoint: 107
+    on_multi_click:
+      - timing: [ON for at most 600ms, OFF for at least 50ms]
+        then:
+          - light.toggle: rgbcw_light
+      - timing: [ON for at least 700ms]
+        then:
+          - script.execute: dim_while_held
+
+  # Multi-clicks and the hold are handled by the MCU; exposed for automations.
+  - platform: tuya
+    id: btn_set
+    name: Set button
+    sensor_datapoint: 108
+
+script:
+  # Long press on the power button: ramp the brightness while it is held.
+  # Each long press reverses the direction, like the stock firmware; from
+  # off it always goes up.
+  - id: dim_while_held
+    mode: restart
+    then:
+      - if:
+          condition:
+            light.is_off: rgbcw_light
+          then:
+            - switch.turn_on: dim_up
+          else:
+            - switch.toggle: dim_up
+      - while:
+          condition:
+            binary_sensor.is_on: btn_power
+          then:
+            - if:
+                condition:
+                  switch.is_on: dim_up
+                then:
+                  - light.dim_relative:
+                      id: rgbcw_light
+                      relative_brightness: 3%
+                      transition_length: 50ms
+                      brightness_limits:
+                        min_brightness: 1%
+                else:
+                  - light.dim_relative:
+                      id: rgbcw_light
+                      relative_brightness: -3%
+                      transition_length: 50ms
+                      brightness_limits:
+                        min_brightness: 1%
+            - delay: 50ms
+
+switch:
+  - platform: template
+    id: dim_up
+    internal: true
+    optimistic: true
+
+  # On for the first 30 s after boot (switched on during setup by its
+  # restore mode); see "Power-on memory".
+  - platform: template
+    id: boot_window
+    internal: true
+    optimistic: true
+    restore_mode: ALWAYS_ON
+    turn_on_action:
+      - delay: 30s
+      - switch.turn_off: boot_window
+
+  # Power-on memory (Set x3). On: the light comes back as it was before the
+  # power cut (the light's RESTORE_DEFAULT_OFF). Off (stock default): the
+  # light always comes on at power-up. The MCU reports this DP during the
+  # start-up handshake, which fires on_turn_off once.
+  - platform: tuya
+    id: power_memory
+    name: Power-on memory
+    switch_datapoint: 114
+    entity_category: config
+    on_turn_off:
+      - if:
+          condition:
+            switch.is_on: boot_window
+          then:
+            - light.turn_on: rgbcw_light
+
+  - platform: tuya
+    id: mcu_reset_settings
+    internal: true
+    switch_datapoint: 115
+
+  # Status LED, manual mode
+  - { platform: tuya, name: Status LED red,   switch_datapoint: 110, entity_category: config }
+  - { platform: tuya, name: Status LED green, switch_datapoint: 111, entity_category: config }
+  - { platform: tuya, name: Status LED blue,  switch_datapoint: 112, entity_category: config }
+
+select:
+  - platform: tuya
+    name: PWM frequency
+    enum_datapoint: 113
+    options:
+      0: 600 Hz
+      1: 800 Hz
+      2: 1000 Hz
+      3: 2000 Hz
+      4: 4000 Hz
+      5: 8000 Hz
+    entity_category: config
+
+  - platform: tuya
+    name: Status LED mode
+    enum_datapoint: 109
+    options:
+      0: Auto
+      1: Manual
+    entity_category: config
+
+# ---- MCU firmware -------------------------------------------------------------
 text_sensor:
+  - platform: tuya
+    name: MCU firmware version
+    sensor_datapoint: 120
+    entity_category: diagnostic
   - platform: version
     name: ESPHome version
+
+update:
+  - platform: tuya_mcu
+    id: mcu_update
+    name: MCU firmware
+    tuya_id: mcu
+    uart_id: mcu_uart
+    source: ${mcu_firmware}
 
 sensor:
   - platform: wifi_signal
@@ -79,5 +262,12 @@ sensor:
     update_interval: 60s
 
 button:
+  # Same as holding Set for 3 s: 1000 Hz, memory off, LED auto, fade 60 ms
+  - platform: template
+    name: Reset controller settings
+    entity_category: config
+    on_press:
+      - switch.turn_on: mcu_reset_settings
+
   - platform: restart
     name: Restart

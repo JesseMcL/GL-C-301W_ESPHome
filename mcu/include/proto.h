@@ -41,8 +41,8 @@ void     app_set_led_mode(uint8_t mode);
 uint8_t  app_get_led_mode(void);
 void     app_set_led(uint8_t led, uint8_t on);
 uint8_t  app_get_led(uint8_t led);
-/* 1-byte settings DPs 113..116 (strip type, PWM frequency, power memory,
- * reset). The app ignores out-of-range values. */
+/* 1-byte settings DPs 113..115 (PWM frequency, power memory, reset).
+ * The app ignores out-of-range values. */
 uint8_t  app_get_cfg(uint8_t dp);
 void     app_set_cfg(uint8_t dp, uint8_t v);
 /* Start an MCU firmware update of `size` bytes. On success this resets

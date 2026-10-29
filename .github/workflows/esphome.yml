@@ -24,7 +24,7 @@ jobs:
             ~/.platformio
             mcu/.bsp
             esphome/.esphome/platformio
-          key: esphome-${{ runner.os }}-${{ hashFiles('esphome/**/*.yaml', 'mcu/platformio.ini') }}
+          key: esphome-${{ runner.os }}-${{ hashFiles('esphome/*.yaml', 'mcu/platformio.ini') }}
 
       - name: Install ESPHome + PlatformIO
         run: pip install --upgrade esphome platformio
@@ -40,13 +40,9 @@ jobs:
           cp secrets.example.yaml secrets.yaml
           sed -i "s|REPLACE_WITH_32_BYTE_BASE64_KEY_xxxxxxxxxxx=|$(openssl rand -base64 32)|" secrets.yaml
 
-      - name: Validate (every light package)
+      - name: Validate
         working-directory: esphome
-        run: |
-          for t in cct rgbcct rgbw rgb dimmer; do
-            sed "s#packages/light-cct.yaml#packages/light-$t.yaml#" gl-c-301w.yaml > ci-$t.yaml
-            esphome -s mcu_firmware ../mcu/dist/manifest.json config ci-$t.yaml > /dev/null
-          done
+        run: esphome -s mcu_firmware ../mcu/dist/manifest.json config gl-c-301w.yaml
 
       - name: Compile (BK7238)
         working-directory: esphome

@@ -1,5 +1,5 @@
-/* Application logic tests: settings log, strip mapping, PWM frequency
- * table and Set-button gestures (src/app/logic.c). */
+/* Application logic tests: settings log, PWM frequency table and
+ * Set-button gestures (src/app/logic.c). */
 #include <unity.h>
 #include <string.h>
 #include "logic.h"
@@ -58,9 +58,8 @@ void tearDown(void) {}
 /* ---- settings ---- */
 static void test_defaults_on_blank_flash(void)
 {
-    cfg.strip = STRIP_RGB;
+    cfg.freq = PWM_FREQ_8000;
     TEST_ASSERT_EQUAL(0, settings_load());
-    TEST_ASSERT_EQUAL(STRIP_RGBCCT, cfg.strip);
     TEST_ASSERT_EQUAL(PWM_FREQ_1000, cfg.freq);
     TEST_ASSERT_EQUAL(0, cfg.memory);
     TEST_ASSERT_EQUAL(LED_MODE_AUTO, cfg.led_mode);
@@ -69,24 +68,22 @@ static void test_defaults_on_blank_flash(void)
 
 static void test_save_load_roundtrip(void)
 {
-    cfg.strip = STRIP_CCT;
     cfg.freq = PWM_FREQ_600;
     cfg.memory = 1;
-    cfg.led_mode = LED_MODE_QUIET;
+    cfg.led_mode = LED_MODE_MANUAL;
     cfg.fade_ms = 1234;
     settings_save();
     settings_defaults();
     TEST_ASSERT_EQUAL(1, settings_load());
-    TEST_ASSERT_EQUAL(STRIP_CCT, cfg.strip);
     TEST_ASSERT_EQUAL(PWM_FREQ_600, cfg.freq);
     TEST_ASSERT_EQUAL(1, cfg.memory);
-    TEST_ASSERT_EQUAL(LED_MODE_QUIET, cfg.led_mode);
+    TEST_ASSERT_EQUAL(LED_MODE_MANUAL, cfg.led_mode);
     TEST_ASSERT_EQUAL(1234, cfg.fade_ms);
 }
 
 static void test_unchanged_save_writes_nothing(void)
 {
-    cfg.strip = STRIP_RGBW;
+    cfg.freq = PWM_FREQ_2000;
     settings_save();
     writes = 0;
     settings_save();
@@ -111,26 +108,26 @@ static void test_log_wraps_with_one_erase_per_page(void)
 
 static void test_torn_record_is_skipped(void)
 {
-    cfg.strip = STRIP_RGB;
+    cfg.freq = PWM_FREQ_600;
     settings_save();
-    cfg.strip = STRIP_DIMMER;
+    cfg.freq = PWM_FREQ_8000;
     settings_save();
     flash[SETTINGS_ADDR + SETTINGS_RECORD + 7] = 0x00;   /* break 2nd check byte */
     settings_load();
-    TEST_ASSERT_EQUAL(STRIP_RGB, cfg.strip);
+    TEST_ASSERT_EQUAL(PWM_FREQ_600, cfg.freq);
     /* the next save goes after the torn slot, and wins */
-    cfg.strip = STRIP_CCT;
+    cfg.freq = PWM_FREQ_4000;
     settings_save();
     settings_defaults();
     settings_load();
-    TEST_ASSERT_EQUAL(STRIP_CCT, cfg.strip);
+    TEST_ASSERT_EQUAL(PWM_FREQ_4000, cfg.freq);
 }
 
 static void test_out_of_range_record_rejected(void)
 {
-    cfg.strip = STRIP_RGB;
+    cfg.freq = PWM_FREQ_600;
     settings_save();
-    /* hand-made record with strip = 9 but a correct check byte */
+    /* hand-made record with freq = 9 but a correct check byte */
     {
         uint8_t r[8] = {SETTINGS_TAG, 9, 0, 0, 0, 0, 0, 0};
         uint8_t i, sum = 0;
@@ -139,7 +136,7 @@ static void test_out_of_range_record_rejected(void)
         memcpy(&flash[SETTINGS_ADDR + SETTINGS_RECORD], r, 8);
     }
     settings_load();
-    TEST_ASSERT_EQUAL(STRIP_RGB, cfg.strip);
+    TEST_ASSERT_EQUAL(PWM_FREQ_600, cfg.freq);
 }
 
 /* ---- PWM frequency ---- */
@@ -167,49 +164,14 @@ static void test_pwm_freq_order_matches_manual(void)
     TEST_ASSERT_EQUAL(6, pwm_freq_flashes(PWM_FREQ_8000));
 }
 
-/* ---- strip mapping ---- */
-static void test_strip_map(void)
+static void test_default_on_lights_something(void)
 {
-    const uint16_t l[NUM_CH] = {1, 2, 3, 4, 5};     /* R G B C W */
-    uint16_t p[NUM_CH];
-
-    strip_map(STRIP_RGBCCT, l, p);
-    TEST_ASSERT_EQUAL_UINT16_ARRAY(l, p, NUM_CH);
-
-    strip_map(STRIP_RGBW, l, p);
-    { const uint16_t e[] = {1, 2, 3, 0, 5}; TEST_ASSERT_EQUAL_UINT16_ARRAY(e, p, NUM_CH); }
-
-    strip_map(STRIP_RGB, l, p);
-    { const uint16_t e[] = {1, 2, 3, 0, 0}; TEST_ASSERT_EQUAL_UINT16_ARRAY(e, p, NUM_CH); }
-
-    strip_map(STRIP_CCT, l, p);   /* 2nd strip: W on B, C on G, R unused */
-    { const uint16_t e[] = {0, 4, 5, 4, 5}; TEST_ASSERT_EQUAL_UINT16_ARRAY(e, p, NUM_CH); }
-
-    strip_map(STRIP_DIMMER, l, p);
-    { const uint16_t e[] = {5, 5, 5, 5, 5}; TEST_ASSERT_EQUAL_UINT16_ARRAY(e, p, NUM_CH); }
-}
-
-static void test_default_on_lights_something_for_every_type(void)
-{
-    uint16_t l[NUM_CH], p[NUM_CH];
-    uint8_t s, i, any;
-    for (s = 0; s < STRIP_COUNT; s++) {
-        strip_default_on(s, l);
-        strip_map(s, l, p);
-        any = 0;
-        for (i = 0; i < NUM_CH; i++)
-            if (p[i]) any = 1;
-        TEST_ASSERT_TRUE_MESSAGE(any, "strip type would stay dark");
-    }
-}
-
-static void test_indicator_colours(void)
-{
-    TEST_ASSERT_EQUAL(COLOUR_R | COLOUR_G | COLOUR_B, strip_colour(STRIP_RGBCCT)); /* white */
-    TEST_ASSERT_EQUAL(COLOUR_R | COLOUR_G, strip_colour(STRIP_RGBW));             /* yellow */
-    TEST_ASSERT_EQUAL(COLOUR_B, strip_colour(STRIP_RGB));
-    TEST_ASSERT_EQUAL(COLOUR_G, strip_colour(STRIP_CCT));
-    TEST_ASSERT_EQUAL(COLOUR_R, strip_colour(STRIP_DIMMER));
+    uint16_t l[NUM_CH];
+    uint8_t i, any = 0;
+    default_on(l);
+    for (i = 0; i < NUM_CH; i++)
+        if (l[i]) any = 1;
+    TEST_ASSERT_TRUE(any);
 }
 
 /* ---- Set button gestures ---- */
@@ -279,9 +241,7 @@ int main(void)
     RUN_TEST(test_out_of_range_record_rejected);
     RUN_TEST(test_pwm_periods);
     RUN_TEST(test_pwm_freq_order_matches_manual);
-    RUN_TEST(test_strip_map);
-    RUN_TEST(test_default_on_lights_something_for_every_type);
-    RUN_TEST(test_indicator_colours);
+    RUN_TEST(test_default_on_lights_something);
     RUN_TEST(test_click_counts);
     RUN_TEST(test_event_after_gap_only);
     RUN_TEST(test_long_press);

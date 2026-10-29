@@ -1,6 +1,6 @@
 /*
- * Hardware-independent application logic: persistent settings, strip type
- * channel mapping, PWM frequency table and Set-button gestures.
+ * Hardware-independent application logic: persistent settings, PWM
+ * frequency table and Set-button gestures.
  * Compiles with SDCC for the MS51 and with gcc for the host tests.
  */
 #ifndef LOGIC_H
@@ -11,9 +11,8 @@
 
 /* ---- settings (persisted in the SETTINGS_ADDR flash page) ------------ */
 typedef struct {
-    uint8_t  strip;         /* STRIP_*            DP 113 */
-    uint8_t  freq;          /* PWM_FREQ_*         DP 114 */
-    uint8_t  memory;        /* 0/1                DP 115 */
+    uint8_t  freq;          /* PWM_FREQ_*         DP 113 */
+    uint8_t  memory;        /* 0/1                DP 114 */
     uint8_t  led_mode;      /* LED_MODE_*         DP 109 */
     uint16_t fade_ms;       /* 0..FADE_MS_MAX     DP 106 */
 } settings_t;
@@ -27,7 +26,7 @@ uint8_t settings_load(void);
 void    settings_save(void);
 
 #define SETTINGS_RECORD     8U
-#define SETTINGS_TAG        0x5AU
+#define SETTINGS_TAG        0x5BU
 
 /* flash access, provided by main.c / tests (addresses are APROM offsets) */
 uint8_t lhal_flash_read(uint16_t addr);
@@ -39,14 +38,11 @@ uint16_t pwm_period_of(uint8_t freq);   /* PWM0P value (counts - 1) at Fsys */
 uint8_t  pwm_freq_next(uint8_t freq);   /* Set x2: 1000->2000->4000->8000->600->800 */
 uint8_t  pwm_freq_flashes(uint8_t freq);/* indicator flashes, 600 Hz = 1 .. 8 kHz = 6 */
 
-/* ---- strip type ------------------------------------------------------ */
-/* logical channels (what ESPHome sets) -> physical outputs, both R,G,B,C,W */
-void    strip_map(uint8_t strip, const uint16_t *logical, uint16_t *phys);
-/* logical levels for "on" when there is nothing to restore (local control) */
-void    strip_default_on(uint8_t strip, uint16_t *logical);
-/* indicator colour: bit2 = red, bit1 = green, bit0 = blue */
-uint8_t strip_colour(uint8_t strip);
+/* ---- misc ------------------------------------------------------------ */
+/* channel levels (R,G,B,C,W) for "on" when there is nothing to restore */
+void    default_on(uint16_t *levels);
 
+/* indicator colour: bit2 = red, bit1 = green, bit0 = blue */
 #define COLOUR_R            4U
 #define COLOUR_G            2U
 #define COLOUR_B            1U
@@ -54,7 +50,7 @@ uint8_t strip_colour(uint8_t strip);
 
 /* ---- Set button gestures --------------------------------------------- */
 #define GEST_NONE           0
-#define GEST_CLICK1         1     /* switch strip type      */
+#define GEST_CLICK1         1     /* not used by the MCU (stock: strip type) */
 #define GEST_CLICK2         2     /* switch PWM frequency   */
 #define GEST_CLICK3         3     /* toggle power memory    */
 #define GEST_LONG           4     /* factory defaults       */
