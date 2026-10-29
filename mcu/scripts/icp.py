@@ -16,6 +16,8 @@ Environment:
                                                 use ~/.ssh/config / your login)
     ICP_PYTHON  python on the Pi with nuvoprogpy (default: python3)
     ICP_DIR     staging directory on the Pi    (default: gl-c-301w-icp)
+    ICP_SSH     ssh client command               (default: ssh). e.g. "plink -batch"
+                to use PuTTY/Pageant keys directly
     ICP_LIBRARY GPIO library for nuvo51icpy: pigpio | gpiod
                                                (default: not passed, so
                                                 nuvo51icpy uses its default)
@@ -33,6 +35,7 @@ TARGET = "%s@%s" % (USER, HOST) if USER else HOST   # ssh destination
 PY = os.environ.get("ICP_PYTHON", "python3")
 RDIR = os.environ.get("ICP_DIR", "gl-c-301w-icp")
 LIBRARY = os.environ.get("ICP_LIBRARY", "")
+SSH = shlex.split(os.environ.get("ICP_SSH", "ssh"), posix=(os.name != "nt"))
 HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else None
 
 
@@ -62,7 +65,7 @@ def run_remote(action, scripts_dir, aprom=None, ldrom=None, config=None, mass_er
     d = shlex.quote(RDIR)
     flash = " ".join(shlex.quote(x) for x in [PY, "-u", RDIR + "/pi_flash.py", *args])
     remote = "mkdir -p %s && tar -xf - -C %s && %s" % (d, d, flash)
-    return subprocess.run(["ssh", TARGET, remote], input=buf.getvalue()).returncode
+    return subprocess.run([*SSH, TARGET, remote], input=buf.getvalue()).returncode
 
 
 if __name__ == "SCons.Script":
