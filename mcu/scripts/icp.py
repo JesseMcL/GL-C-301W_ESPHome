@@ -16,6 +16,9 @@ Environment:
                                                 use ~/.ssh/config / your login)
     ICP_PYTHON  python on the Pi with nuvoprogpy (default: python3)
     ICP_DIR     staging directory on the Pi    (default: gl-c-301w-icp)
+    ICP_LIBRARY GPIO library for nuvo51icpy: pigpio | gpiod
+                                               (default: not passed, so
+                                                nuvo51icpy uses its default)
 """
 import io
 import os
@@ -29,6 +32,7 @@ HOST = os.environ.get("ICP_HOST", "raspberrypi")
 TARGET = "%s@%s" % (USER, HOST) if USER else HOST   # ssh destination
 PY = os.environ.get("ICP_PYTHON", "python3")
 RDIR = os.environ.get("ICP_DIR", "gl-c-301w-icp")
+LIBRARY = os.environ.get("ICP_LIBRARY", "")
 HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else None
 
 
@@ -47,6 +51,8 @@ def run_remote(action, scripts_dir, aprom=None, ldrom=None, config=None, mass_er
             args += [opt, RDIR + "/" + os.path.basename(path)]
     if mass_erase:
         args.append("--mass-erase")
+    if LIBRARY:
+        args += ["--library", LIBRARY]
 
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w") as tar:

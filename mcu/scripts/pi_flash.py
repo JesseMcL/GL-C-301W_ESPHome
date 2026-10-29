@@ -17,6 +17,7 @@ erased first, which also re-enables the reset pin.
 """
 import argparse
 import json
+import os
 import sys
 
 try:
@@ -44,10 +45,16 @@ def main():
     ap.add_argument("--ldrom")
     ap.add_argument("--config")
     ap.add_argument("--mass-erase", action="store_true")
+    ap.add_argument("--library", default=os.environ.get("ICP_LIBRARY"),
+                    help="GPIO library for nuvo51icpy: pigpio or gpiod "
+                         "(default: nuvo51icpy's own default)")
     a = ap.parse_args()
 
+    # only pass library= when asked, so nuvo51icpy's default applies otherwise
+    icp_kwargs = {"library": a.library} if a.library else {}
+
     print(">>> Power-cycle the GL-C-301W now if ICP entry does not succeed <<<", flush=True)
-    with Nuvo51ICP() as icp:
+    with Nuvo51ICP(**icp_kwargs) as icp:
         info = icp.get_device_info()
         print(info)
         locked = info.is_unsupported or icp._needs_unlock()
