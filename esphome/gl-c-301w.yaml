@@ -98,6 +98,7 @@ output:
 light:
   - platform: rgbww
     id: rgbcw_light
+    name: ""
     red: out_r
     green: out_g
     blue: out_b
