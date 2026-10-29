@@ -19,7 +19,11 @@ cc -O1 -DPROTO_VERSION_HOOK -I"$ROOT/mcu/include" -I"$ROOT/mcu/src/boot" -o "$WO
 
 socat pty,raw,echo=0,link=/tmp/esptty pty,raw,echo=0,link=/tmp/mcutty &
 sleep 1
-python3 make_host_yaml.py ../gl-c-301w.yaml host-integration.yaml
+# tuya_mcu_dfu: a sibling checkout of esphome_tuya_mcu_dfu if there is one
+# (or DFU_DIR), else GitHub
+DFU_DIR=${DFU_DIR:-$ROOT/../esphome_tuya_mcu_dfu}
+if [ -d "$DFU_DIR/components" ]; then DFU_COMPONENTS=$(cd "$DFU_DIR/components" && pwd); else DFU_COMPONENTS=; fi
+python3 make_host_yaml.py ../gl-c-301w.yaml host-integration.yaml $DFU_COMPONENTS
 esphome compile host-integration.yaml
 "$WORK/mcu_sim" /tmp/mcutty "$WORK/old.icp.bin" --press-power-at 36000 --hold-power-at 38000 > "$WORK/sim.log" &
 sleep 0.3

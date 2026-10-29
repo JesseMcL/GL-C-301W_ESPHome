@@ -40,13 +40,16 @@ esphome:
   friendly_name: ${friendly_name}
 
 external_components:
+  # paced datapoint outputs (this repo). Once the repo is on GitHub, this
+  # works from anywhere:
+  #   - source: github://JesseMcL/GL-C-301W_ESPHome/esphome/components@main
   - source:
       type: local
       path: components
     components: [tuya_mcu]
-  # once the repo is on GitHub, this works from anywhere:
-  # - source: github://JesseMcL/GL-C-301W_ESPHome/esphome/components@main
-  #   components: [tuya_mcu]
+  # MCU firmware update: https://github.com/JesseMcL/esphome_tuya_mcu_dfu
+  - source: github://JesseMcL/esphome_tuya_mcu_dfu@main
+    components: [tuya_mcu_dfu]
 
 bk72xx:
   board: t1-u
@@ -249,12 +252,14 @@ text_sensor:
     name: ESPHome version
 
 update:
-  - platform: tuya_mcu
+  - platform: tuya_mcu_dfu
     id: mcu_update
     name: MCU firmware
     tuya_id: mcu
     uart_id: mcu_uart
     source: ${mcu_firmware}
+    chip_family: MS51FC0AE
+    version_datapoint: 120
 
 sensor:
   - platform: wifi_signal

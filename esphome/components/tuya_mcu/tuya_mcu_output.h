@@ -14,6 +14,8 @@ namespace esphome::tuya_mcu {
 /// `min_interval` across all TuyaMcuOutput instances (oldest pending first),
 /// so a 5-channel light transition can't overrun the request/response UART.
 /// The MCU smooths between updates with its own fade (DP 106 on the GL-C-301W).
+/// Writes are held while `tuya:` is not running its loop (e.g. during an MCU
+/// firmware update by tuya_mcu_dfu) or not initialised.
 class TuyaMcuOutput : public output::FloatOutput, public Component {
  public:
   void set_tuya_parent(tuya::Tuya *parent) { this->parent_ = parent; }
@@ -25,9 +27,6 @@ class TuyaMcuOutput : public output::FloatOutput, public Component {
   void loop() override;
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::DATA; }
-
-  /// Hold all writes (used while the MCU firmware is being updated).
-  static void set_paused(bool paused);
 
  protected:
   void write_state(float state) override;
@@ -45,7 +44,6 @@ class TuyaMcuOutput : public output::FloatOutput, public Component {
   static std::vector<TuyaMcuOutput *> instances_;  // NOLINT
   static uint32_t last_send_;                       // NOLINT
   static uint32_t min_interval_;                    // NOLINT
-  static bool paused_;                              // NOLINT
 };
 
 }  // namespace esphome::tuya_mcu

@@ -12,7 +12,6 @@ static const char *const TAG = "tuya_mcu.output";
 std::vector<TuyaMcuOutput *> TuyaMcuOutput::instances_;  // NOLINT
 uint32_t TuyaMcuOutput::last_send_ = 0;                  // NOLINT
 uint32_t TuyaMcuOutput::min_interval_ = 15;              // NOLINT
-bool TuyaMcuOutput::paused_ = false;                     // NOLINT
 
 void TuyaMcuOutput::setup() {
   instances_.push_back(this);
@@ -30,16 +29,6 @@ void TuyaMcuOutput::dump_config() {
   ESP_LOGCONFIG(TAG, "  Datapoint: %u", this->datapoint_);
   ESP_LOGCONFIG(TAG, "  Max value: %" PRIu32, this->max_value_);
   LOG_FLOAT_OUTPUT(this);
-}
-
-void TuyaMcuOutput::set_paused(bool paused) {
-  paused_ = paused;
-  if (!paused) {
-    for (auto *o : instances_) {
-      if (o->dirty_)
-        o->enable_loop();
-    }
-  }
 }
 
 void TuyaMcuOutput::write_state(float state) {
@@ -66,7 +55,8 @@ void TuyaMcuOutput::loop() {
     this->disable_loop();
     return;
   }
-  if (paused_ || this->parent_->get_init_state() != tuya::TuyaInitState::INIT_DONE)
+  // tuya: suspended (MCU firmware update) or (re)initialising: hold, keep polling
+  if (this->parent_->is_idle() || this->parent_->get_init_state() != tuya::TuyaInitState::INIT_DONE)
     return;
   const uint32_t now = millis();
   if (now - last_send_ < min_interval_)

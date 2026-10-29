@@ -6,7 +6,7 @@
 # while you try. The MCU firmware update entity shows "installable" because
 # the stock MCU doesn't report DP 120 (version unknown).
 #
-#  1. Flash this to the T1-U. Watch the log (VERBOSE for tuya + tuya_mcu).
+#  1. Flash this to the T1-U. Watch the log (VERBOSE for tuya + tuya_mcu_dfu).
 #     If "MCU restarted" never appears, the stock MCU isn't at 9600: try 115200.
 #  2. Press Install on "MCU firmware". Look for "MCU accepted update" and the
 #     packet size the stock MCU asked for.
@@ -29,10 +29,9 @@ esphome:
   friendly_name: ${friendly_name}
 
 external_components:
-  - source:
-      type: local
-      path: components
-    components: [tuya_mcu]
+  # MCU firmware update: https://github.com/JesseMcL/esphome_tuya_mcu_dfu
+  - source: github://JesseMcL/esphome_tuya_mcu_dfu@main
+    components: [tuya_mcu_dfu]
 
 bk72xx:
   board: t1-u
@@ -42,7 +41,7 @@ logger:
   level: VERBOSE
   logs:
     tuya: VERBOSE
-    tuya_mcu.update: VERBOSE
+    tuya_mcu_dfu: VERBOSE
 
 api:
   encryption:
@@ -86,12 +85,14 @@ light:
     warm_white_color_temperature: 2700 K
 
 update:
-  - platform: tuya_mcu
+  - platform: tuya_mcu_dfu
     id: mcu_update
     name: MCU firmware
     tuya_id: mcu
     uart_id: mcu_uart
     source: ${mcu_firmware}
+    chip_family: MS51FC0AE
+    version_datapoint: 120
     # stock firmware may be slow to answer while it erases flash
     start_timeout: 15s
     packet_timeout: 10s

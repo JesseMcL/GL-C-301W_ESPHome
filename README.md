@@ -7,7 +7,7 @@ Open firmware for the **Gledopto GL-C-301W** Wi-Fi 5-in-1 LED controller:
 
 ```
  Home Assistant ──API── ESPHome on T1-U (BK7238)
-                          │ tuya: + tuya_mcu (this repo)
+                          │ tuya: + tuya_mcu (this repo) + tuya_mcu_dfu
                           │ UART1 P11/P10, 115200, TuyaMCU frames
                           ▼
                        MS51FC0AE
@@ -175,7 +175,7 @@ mcu/                      PlatformIO project (platform intel_mcs51, board MS51FC
 esphome/
   gl-c-301w.yaml          the device
   stock-mcu-update.yaml   experiment: update a stock MCU through its Tuya OTA
-  components/tuya_mcu/    external component: paced DP outputs + MCU update entity
+  components/tuya_mcu/    external component: paced DP outputs
   test/                   host integration test (ESPHome host build ↔ simulator)
 .github/workflows/        CI + tagged releases
 ```
@@ -278,10 +278,10 @@ Set `ICP_HOST` (default `raspberrypi`), `ICP_USER` (default `pi`; set it empty t
 
 `esphome/gl-c-301w.yaml` is the whole device. The light is an RGBCCT (`rgbww`) light; for other strips change its platform and keep `id: rgbcw_light` (the comment above the light lists the options). The `min_power` substitution maps 0 % to the level where the strip just starts to glow. The YAML uses ESPHome actions only, no lambdas.
 
-The external component `tuya_mcu` provides:
+Two external components:
 
-- **`output: platform: tuya_mcu`** gives one float output per channel DP, so a normal `cwww`/`rgbww` light can use them. Writes are coalesced and paced (`min_interval`, oldest first), so a 5-channel transition can't flood the request/response UART. The MCU fades between updates using DP 106.
-- **`update: platform: tuya_mcu`** is an **MCU firmware** update entity in Home Assistant. It compares DP 120 with the bundled release and installs it with the standard Tuya MCU upgrade protocol, showing progress. The new version is verified after the MCU reboots.
+- **`output: platform: tuya_mcu`** gives one float output per channel DP, so a normal `cwww`/`rgbww` light can use them. Writes are coalesced and paced (`min_interval`, oldest first), so a 5-channel transition can't flood the request/response UART. The MCU fades between updates using DP 106. Writes are held while `tuya:` is suspended for an MCU update.
+- **`update: platform: tuya_mcu_dfu`** from [esphome_tuya_mcu_dfu](https://github.com/JesseMcL/esphome_tuya_mcu_dfu) (its own repo, usable with any TuyaMCU device) is the **MCU firmware** update entity in Home Assistant. It compares DP 120 with the bundled release and installs it with the standard Tuya MCU upgrade protocol, showing progress. The new version is verified after the MCU reboots. The YAML pulls it from GitHub (`@main`); pin a tag or commit there for reproducible builds.
 - Buttons are `binary_sensor: tuya` entities. Power: click → `light.toggle`; hold → a script repeats `light.dim_relative` (±3 % every 50 ms) while the button is down, reversing direction on each hold. The Set button is handled in the MCU and is only reported.
 - Settings: **PWM frequency** and **Status LED mode** are `select: tuya`; **Power-on memory** is a `switch: tuya`; **Reset controller settings** is a template button that writes DP 115. They follow changes made with the Set button.
 - **Power-on memory.** The light uses `restore_mode: RESTORE_DEFAULT_OFF`, which restores the state from before a reboot. With memory off (the stock default), the MCU reports DP 114 = off during the start-up handshake. That fires `on_turn_off` inside a 30 s boot window, which turns the light on. Note that an ESPHome OTA reboot counts as a power-up here too.
@@ -323,7 +323,7 @@ Done:
 - **SDCC 4.2 via PlatformIO:** app 8.1 KB of 29.4 KB, bootloader 2.4 KB of 3 KB.
 - **Host tests (Unity), 36 cases:** TuyaMCU init, every DP including the settings DPs, multi-DP frames, clamping, framing errors, and the OTA hand-off. Logic: settings log (round trip, wrap and erase, torn and out-of-range records), PWM periods and the manual's frequency order, and Set gestures (1/2/3 clicks, hold, click then hold). For the bootloader against simulated NOR flash: full update, update from rescue, retransmits, corrupted image, verify failure, size limits, wait timeout, rescue never times out, and the largest possible image (the settings page survives it).
 - **End-to-end** (`esphome/test/run.sh`):
-  - ESPHome 2026.10 (host build of this YAML with the real `tuya:` and `tuya_mcu`) talks over a pty to `mcu/sim`, which runs the real `proto.c` and `boot_core.c`.
+  - ESPHome 2026.10 (host build of this YAML with the real `tuya:`, `tuya_mcu` and `tuya_mcu_dfu`; `run.sh` uses a sibling `esphome_tuya_mcu_dfu` checkout, or `DFU_DIR`, if present) talks over a pty to `mcu/sim`, which runs the real `proto.c` and `boot_core.c`.
   - The light transitions arrive as paced DP writes. The MCU update goes 1.0.0 → 1.1.0 and is verified in about 1 s. A corrupted app (rescue mode) is recovered. A power click turns the light off, and a power hold dims it up from off.
 - **ESPHome build for BK7238** (board `t1-u`) with this component compiles.
 - **PlatformIO ICP targets** produce the expected single ssh session (files streamed as tar, then `pi_flash.py`; tested with a dummy ssh).
