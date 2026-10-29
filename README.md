@@ -344,3 +344,10 @@ Not done yet (needs hardware):
 - RF remote (2.4 GHz IC driver and protocol).
 - Confirm LED polarity (`LED_ACTIVE_LOW`), button polarity, and PWM polarity (`PWM_INVERT_MASK`).
 - Stock behaviour not in the manual is guessed: the click gap (400 ms), the strip blink timing, and what the strip-type click shows on the strip (nothing; only the LED changes).
+
+## License
+
+[MIT](LICENSE), except as noted below.
+
+- The MS51 clock-trim and IAP sequences in `mcu/src/` follow Nuvoton's [MS51 BSP](https://github.com/OpenNuvoton/MS51_BSP) (Apache-2.0) and Nikita Lita's [NuMicro-8051-prog](https://github.com/nikitalita/NuMicro-8051-prog) (MIT). The BSP headers are fetched at build time and keep their own license.
+- `esphome/components/tuya_mcu` is built against ESPHome, whose C++ core is GPL-3.0, so compiled ESPHome firmware is distributed under GPL-3.0.
