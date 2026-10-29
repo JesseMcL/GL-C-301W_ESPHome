@@ -17,20 +17,26 @@ Environment:
     ICP_PYTHON  python on the Pi with nuvoprogpy (default: python3)
     ICP_DIR     staging directory on the Pi    (default: gl-c-301w-icp)
 """
+import io
 import os
 import shlex
 import subprocess
 import sys
+import tarfile
 
 USER = os.environ.get("ICP_USER", "pi")
 HOST = os.environ.get("ICP_HOST", "raspberrypi")
-TARGET = "%s@%s" % (USER, HOST) if USER else HOST   # ssh/scp destination
+TARGET = "%s@%s" % (USER, HOST) if USER else HOST   # ssh destination
 PY = os.environ.get("ICP_PYTHON", "python3")
 RDIR = os.environ.get("ICP_DIR", "gl-c-301w-icp")
 HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else None
 
 
 def run_remote(action, scripts_dir, aprom=None, ldrom=None, config=None, mass_erase=False):
+    """One ssh connection (one password prompt): the files travel as a tar
+    stream on stdin, are unpacked into ICP_DIR, then pi_flash.py runs.
+    pi_flash.py never reads stdin, so no tty is needed; `python -u` keeps its
+    progress / "power-cycle now" output unbuffered."""
     files = [os.path.join(scripts_dir, "pi_flash.py")]
     args = [action]
     for opt, path in (("--aprom", aprom), ("--ldrom", ldrom), ("--config", config)):
@@ -41,11 +47,16 @@ def run_remote(action, scripts_dir, aprom=None, ldrom=None, config=None, mass_er
             args += [opt, RDIR + "/" + os.path.basename(path)]
     if mass_erase:
         args.append("--mass-erase")
-    subprocess.check_call(["ssh", TARGET, "mkdir -p " + shlex.quote(RDIR)])
-    subprocess.check_call(["scp", "-q", *files, "%s:%s/" % (TARGET, RDIR)])
-    cmd = " ".join(shlex.quote(x) for x in [PY, RDIR + "/pi_flash.py", *args])
-    # -t: nuvo51icpy may prompt, and you need to see when to power-cycle
-    return subprocess.call(["ssh", "-t", TARGET, cmd])
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for f in files:
+            tar.add(f, arcname=os.path.basename(f))
+
+    d = shlex.quote(RDIR)
+    flash = " ".join(shlex.quote(x) for x in [PY, "-u", RDIR + "/pi_flash.py", *args])
+    remote = "mkdir -p %s && tar -xf - -C %s && %s" % (d, d, flash)
+    return subprocess.run(["ssh", TARGET, remote], input=buf.getvalue()).returncode
 
 
 if __name__ == "SCons.Script":
