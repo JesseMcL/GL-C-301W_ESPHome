@@ -41,6 +41,10 @@ void     app_set_led_mode(uint8_t mode);
 uint8_t  app_get_led_mode(void);
 void     app_set_led(uint8_t led, uint8_t on);
 uint8_t  app_get_led(uint8_t led);
+/* 1-byte settings DPs 113..116 (strip type, PWM frequency, power memory,
+ * reset). The app ignores out-of-range values. */
+uint8_t  app_get_cfg(uint8_t dp);
+void     app_set_cfg(uint8_t dp, uint8_t v);
 /* Start an MCU firmware update of `size` bytes. On success this resets
  * into the bootloader and does not return; returns 0 if not possible. */
 uint8_t  app_ota_request(uint32_t size);
@@ -49,6 +53,8 @@ uint8_t  app_ota_request(uint32_t size);
 void    proto_init(void);
 void    proto_rx(uint8_t b, uint16_t now_ms);
 void    proto_poll(uint16_t now_ms);
+/* Report one datapoint (e.g. after a local change). */
+void    proto_report(uint8_t dp);
 /* Report a button state change (DP 107 / 108). */
 void    proto_report_button(uint8_t btn);
 

@@ -20,11 +20,9 @@
 #endif
 
 /* ---- PWM ------------------------------------------------------------- */
-/* PWM0 clocked at Fsys/1, frequency = Fsys / (PWM_PERIOD + 1).
- * 4095 -> 5.86 kHz, 12-bit. 7999 -> 3 kHz ~13 bit. 11999 -> 2 kHz. */
-#ifndef PWM_PERIOD
-#define PWM_PERIOD            4095U
-#endif
+/* PWM0 clocked at Fsys/1. The frequency is a setting (DP 114, Set x2),
+ * 600 Hz .. 8 kHz as in the stock firmware, default 1 kHz (24000 counts,
+ * ~14.5 bit). See logic.c. */
 /* Bits: 0=R 1=G 2=B 3=C 4=W. Set a bit if that driver is active-low. */
 #ifndef PWM_INVERT_MASK
 #define PWM_INVERT_MASK       0x00
@@ -43,6 +41,8 @@
  * PB-Power -> P2.0 (pin 4, nRESET), active-low. Works as a button only
  * once CONFIG0.RPD = 0 (reset pin disabled).                            */
 #define BTN_DEBOUNCE_MS       20
+/* Power button held this long = dimming (local control only; with ESPHome
+ * connected the YAML handles the button). Set-button timing: logic.h. */
 #define BTN_LONG_MS           800
 
 /* ---- Fading ---------------------------------------------------------- */
@@ -52,12 +52,23 @@
 
 /* ---- Link supervision / local fallback ------------------------------- */
 #define LINK_TIMEOUT_MS       40000UL
-#define LOCAL_DEFAULT_R       0
-#define LOCAL_DEFAULT_G       0
-#define LOCAL_DEFAULT_B       0
-#define LOCAL_DEFAULT_C       32768U
-#define LOCAL_DEFAULT_W       32768U
+/* "On" level when there is nothing to restore (per strip type, logic.c) */
+#define LOCAL_DEFAULT_LEVEL   32768U
 #define LOCAL_FADE_MS         300
+/* Local dimming: every DIM_STEP_MS the brightest channel moves by 1/32
+ * (at least DIM_MIN_STEP), between DIM_MIN_LEVEL and full. */
+#define DIM_STEP_MS           25
+#define DIM_MIN_STEP          64U
+#define DIM_MIN_LEVEL         640U
+
+/* ---- Strip / indicator confirmation blinks ---------------------------- */
+#define BLINK_HALF_MS         250   /* strip blink on / off time           */
+#define FLASH_HALF_MS         200   /* indicator frequency flashes         */
+#define FLASH_PAUSE_MS        2000  /* dark after the flashes (manual)     */
+/* Settings changes are written to flash this long after the last change
+ * (and only while the UART is idle: IAP stalls the CPU). */
+#define SAVE_DELAY_MS         2000
+#define SAVE_UART_IDLE_MS     30
 
 /* Level at power-up, before ESPHome takes over (0..65535). */
 #define BOOT_LEVEL_R          0

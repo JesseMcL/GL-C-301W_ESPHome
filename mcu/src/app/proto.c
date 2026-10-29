@@ -34,7 +34,8 @@ static const char __code fw_version[] = FW_VERSION;
 static const uint8_t __code all_dps[] = {
     DP_CH_R, DP_CH_G, DP_CH_B, DP_CH_C, DP_CH_W, DP_FADE_MS,
     DP_BTN_POWER, DP_BTN_SET, DP_LED_MODE, DP_LED_RED, DP_LED_GREEN,
-    DP_LED_BLUE, DP_FW_VERSION
+    DP_LED_BLUE, DP_STRIP_TYPE, DP_PWM_FREQ, DP_POWER_MEMORY,
+    DP_RESET_SETTINGS, DP_FW_VERSION
 };
 
 /* ---------------- TX ---------------- */
@@ -87,6 +88,9 @@ static uint8_t tx_dp(uint8_t id, uint8_t emit)
     } else if (id >= DP_LED_RED && id <= DP_LED_BLUE) {
         type = DPT_BOOL; len = 1;
         v = app_get_led(id - DP_LED_RED);
+    } else if (id >= DP_STRIP_TYPE && id <= DP_RESET_SETTINGS) {
+        type = (id <= DP_PWM_FREQ) ? DPT_ENUM : DPT_BOOL; len = 1;
+        v = app_get_cfg(id);
     } else if (id == DP_FW_VERSION) {
         type = DPT_STRING; len = FWV_LEN;
     } else {
@@ -135,10 +139,17 @@ static void report_all(void)
     report_list(id_list, sizeof(all_dps));
 }
 
+/* Not via id_list: may be called while handle_dp_deliver() fills it */
+void proto_report(uint8_t dp)
+{
+    tx_begin(TCMD_DP_REPORT, tx_dp(dp, 0));
+    tx_dp(dp, 1);
+    tx_end();
+}
+
 void proto_report_button(uint8_t btn)
 {
-    id_list[0] = (btn == BTN_POWER) ? DP_BTN_POWER : DP_BTN_SET;
-    report_list(id_list, 1);
+    proto_report((btn == BTN_POWER) ? DP_BTN_POWER : DP_BTN_SET);
 }
 
 /* ---------------- RX handling ---------------- */
@@ -174,9 +185,12 @@ static void handle_dp_deliver(void)
             }
         } else if (dlen == 1) {
             if (id == DP_LED_MODE) {
-                app_set_led_mode(d[0] ? LED_MODE_MANUAL : LED_MODE_AUTO);
+                if (d[0] < LED_MODE_COUNT)
+                    app_set_led_mode(d[0]);
             } else if (id >= DP_LED_RED && id <= DP_LED_BLUE) {
                 app_set_led(id - DP_LED_RED, d[0] != 0);
+            } else if (id >= DP_STRIP_TYPE && id <= DP_RESET_SETTINGS) {
+                app_set_cfg(id, d[0]);          /* validated by the app */
             } else {
                 continue;
             }

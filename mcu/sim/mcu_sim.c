@@ -6,7 +6,7 @@
  *
  *   cc -DPROTO_VERSION_HOOK -Iinclude -Isrc/boot -o mcu_sim sim/mcu_sim.c \
  *      src/app/proto.c src/boot/boot_core.c
- *   ./mcu_sim /dev/pts/N app.icp.bin [--press-power-at MS]
+ *   ./mcu_sim /dev/pts/N app.icp.bin [--press-power-at MS] [--hold-power-at MS]
  *
  * Prints what ESPHome does (channel values, LED, buttons, mode switches).
  */
@@ -55,6 +55,17 @@ void app_set_led_mode(uint8_t m) { led_mode = m; printf("APP led mode %u\n", m);
 uint8_t app_get_led_mode(void) { return led_mode; }
 void app_set_led(uint8_t l, uint8_t on) { leds[l] = on; printf("APP led %u = %u\n", l, on); fflush(stdout); }
 uint8_t app_get_led(uint8_t l) { return leds[l]; }
+static uint8_t cfgv[3];                 /* strip, freq, memory */
+uint8_t app_get_cfg(uint8_t dp) { return dp < DP_RESET_SETTINGS ? cfgv[dp - DP_STRIP_TYPE] : 0; }
+void app_set_cfg(uint8_t dp, uint8_t v)
+{
+    printf("APP cfg dp %u = %u\n", dp, v);
+    fflush(stdout);
+    if (dp < DP_RESET_SETTINGS)
+        cfgv[dp - DP_STRIP_TYPE] = v;
+    else if (v)
+        memset(cfgv, 0, sizeof cfgv);
+}
 const char *proto_fw_version(void) { return version; }
 
 uint8_t app_ota_request(uint32_t size)
@@ -102,15 +113,20 @@ int main(int argc, char **argv)
     struct termios tio;
     uint8_t b;
     uint16_t last = ms();
-    long press_at = -1, elapsed = 0;
+    long press_at = -1, hold_at = -1, elapsed = 0;
+    int a;
     FILE *f;
 
     if (argc < 3) {
         fprintf(stderr, "usage: %s TTY ICP_IMAGE [--press-power-at MS]\n", argv[0]);
         return 2;
     }
-    if (argc >= 5 && !strcmp(argv[3], "--press-power-at"))
-        press_at = atol(argv[4]);
+    for (a = 3; a + 1 < argc; a += 2) {
+        if (!strcmp(argv[a], "--press-power-at"))
+            press_at = atol(argv[a + 1]);
+        else if (!strcmp(argv[a], "--hold-power-at"))
+            hold_at = atol(argv[a + 1]);
+    }
 
     memset(flash, 0xFF, sizeof flash);
     f = fopen(argv[2], "rb");
@@ -170,6 +186,18 @@ int main(int argc, char **argv)
                 proto_report_button(BTN_POWER);
             }
             if (press_at >= 0 && elapsed == press_at + 150 && mode == MODE_APP) {
+                btn[BTN_POWER] = 0;
+                proto_report_button(BTN_POWER);
+            }
+            if (hold_at >= 0 && elapsed == hold_at && mode == MODE_APP) {
+                printf("SIM hold power\n");
+                fflush(stdout);
+                btn[BTN_POWER] = 1;
+                proto_report_button(BTN_POWER);
+            }
+            if (hold_at >= 0 && elapsed == hold_at + 1500 && mode == MODE_APP) {
+                printf("SIM release power\n");
+                fflush(stdout);
                 btn[BTN_POWER] = 0;
                 proto_report_button(BTN_POWER);
             }

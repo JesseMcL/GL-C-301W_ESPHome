@@ -23,6 +23,19 @@ uint8_t app_get_led_mode(void) { return led_mode; }
 void app_set_led(uint8_t l, uint8_t on) { leds[l] = on; }
 uint8_t app_get_led(uint8_t l) { return leds[l]; }
 uint8_t app_ota_request(uint32_t size) { ota_req = size; ota_calls++; return 0; }
+static uint8_t cfgv[4];                       /* DPs 113..116 */
+static int resets;
+uint8_t app_get_cfg(uint8_t dp) { return dp == DP_RESET_SETTINGS ? 0 : cfgv[dp - DP_STRIP_TYPE]; }
+void app_set_cfg(uint8_t dp, uint8_t v)
+{
+    if (dp == DP_RESET_SETTINGS) { if (v) resets++; return; }
+    cfgv[dp - DP_STRIP_TYPE] = v;
+}
+
+/* logic.c is linked into the native build; no flash here */
+uint8_t lhal_flash_read(uint16_t a) { (void)a; return 0xFF; }
+void lhal_flash_erase(uint16_t a) { (void)a; }
+void lhal_flash_write(uint16_t a, uint8_t b) { (void)a; (void)b; }
 
 /* boot_core is linked into the same native build; stub its HAL */
 void bhal_putc(uint8_t b) { (void)b; }
@@ -48,7 +61,8 @@ void setUp(void)
 {
     memset(ch, 0, sizeof ch);
     memset(leds, 0, sizeof leds);
-    led_mode = 0; fade = 60; ota_calls = 0;
+    memset(cfgv, 0, sizeof cfgv);
+    led_mode = 0; fade = 60; ota_calls = 0; resets = 0;
     proto_init();
 }
 void tearDown(void) {}
@@ -89,7 +103,7 @@ static void test_query_reports_all_dps(void)
     TEST_ASSERT_EQUAL(1, send(TCMD_DP_QUERY, NULL, 0));
     TEST_ASSERT_EQUAL(TCMD_DP_REPORT, fr[0].cmd);
     TEST_ASSERT_TRUE(fr[0].ok);
-    for (id = DP_CH_R; id <= DP_LED_BLUE; id++)
+    for (id = DP_CH_R; id <= DP_RESET_SETTINGS; id++)
         TEST_ASSERT_NOT_NULL_MESSAGE(t_find_dp(&fr[0], (uint8_t)id, NULL, NULL), "dp missing");
     v = t_find_dp(&fr[0], DP_CH_C, &type, &len);
     TEST_ASSERT_EQUAL(DPT_VALUE, type);
@@ -138,6 +152,51 @@ static void test_multiple_dps_one_frame(void)
     TEST_ASSERT_EQUAL(LED_MODE_MANUAL, led_mode);
     TEST_ASSERT_EQUAL(1, leds[LED_G]);
     TEST_ASSERT_EQUAL(8 + 5 + 5, fr[0].len);
+}
+
+static void test_settings_dps(void)
+{
+    uint8_t type;
+    const uint8_t *v;
+    uint8_t d[] = {DP_STRIP_TYPE, DPT_ENUM, 0, 1, STRIP_CCT,
+                   DP_PWM_FREQ, DPT_ENUM, 0, 1, PWM_FREQ_600,
+                   DP_POWER_MEMORY, DPT_BOOL, 0, 1, 1};
+    uint8_t r[] = {DP_RESET_SETTINGS, DPT_BOOL, 0, 1, 1};
+    uint8_t m[] = {DP_LED_MODE, DPT_ENUM, 0, 1, 7};
+
+    TEST_ASSERT_EQUAL(1, send(TCMD_DP_DELIVER, d, sizeof d));
+    TEST_ASSERT_EQUAL(STRIP_CCT, cfgv[0]);
+    TEST_ASSERT_EQUAL(PWM_FREQ_600, cfgv[1]);
+    TEST_ASSERT_EQUAL(1, cfgv[2]);
+    v = t_find_dp(&fr[0], DP_STRIP_TYPE, &type, NULL);
+    TEST_ASSERT_EQUAL(DPT_ENUM, type);
+    TEST_ASSERT_EQUAL(STRIP_CCT, v[0]);
+    v = t_find_dp(&fr[0], DP_POWER_MEMORY, &type, NULL);
+    TEST_ASSERT_EQUAL(DPT_BOOL, type);
+    TEST_ASSERT_EQUAL(1, v[0]);
+
+    /* reset is momentary: acted on, reported back as 0 */
+    TEST_ASSERT_EQUAL(1, send(TCMD_DP_DELIVER, r, sizeof r));
+    TEST_ASSERT_EQUAL(1, resets);
+    v = t_find_dp(&fr[0], DP_RESET_SETTINGS, &type, NULL);
+    TEST_ASSERT_EQUAL(0, v[0]);
+
+    /* out-of-range LED mode ignored */
+    led_mode = LED_MODE_QUIET;
+    send(TCMD_DP_DELIVER, m, sizeof m);
+    TEST_ASSERT_EQUAL(LED_MODE_QUIET, led_mode);
+}
+
+static void test_report_single_dp(void)
+{
+    const uint8_t *v;
+    cfgv[1] = PWM_FREQ_8000;
+    t_txn = 0;
+    proto_report(DP_PWM_FREQ);
+    TEST_ASSERT_EQUAL(1, t_frames(fr, 16));
+    TEST_ASSERT_EQUAL(5, fr[0].len);
+    v = t_find_dp(&fr[0], DP_PWM_FREQ, NULL, NULL);
+    TEST_ASSERT_EQUAL(PWM_FREQ_8000, v[0]);
 }
 
 static void test_unknown_dp_still_answered(void)
@@ -202,6 +261,8 @@ int main(void)
     RUN_TEST(test_set_channel_value_dp);
     RUN_TEST(test_value_clamps);
     RUN_TEST(test_multiple_dps_one_frame);
+    RUN_TEST(test_settings_dps);
+    RUN_TEST(test_report_single_dp);
     RUN_TEST(test_unknown_dp_still_answered);
     RUN_TEST(test_button_report);
     RUN_TEST(test_ota_start_forwarded);

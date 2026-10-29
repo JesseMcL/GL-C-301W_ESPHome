@@ -6,6 +6,11 @@
 #include "proto.h"
 #include "../common/tuya_test_util.h"
 
+/* logic.c is linked into the native build too */
+uint8_t lhal_flash_read(uint16_t a) { (void)a; return 0xFF; }
+void lhal_flash_erase(uint16_t a) { (void)a; }
+void lhal_flash_write(uint16_t a, uint8_t b) { (void)a; (void)b; }
+
 static uint8_t flash[FLASH_SIZE];
 static int jumped, erases, writes;
 static int fail_write_at = -1;
@@ -39,6 +44,8 @@ uint8_t app_get_led_mode(void) { return 0; }
 void app_set_led(uint8_t l, uint8_t on) { (void)l; (void)on; }
 uint8_t app_get_led(uint8_t l) { (void)l; return 0; }
 uint8_t app_ota_request(uint32_t s) { (void)s; return 0; }
+uint8_t app_get_cfg(uint8_t dp) { (void)dp; return 0; }
+void app_set_cfg(uint8_t dp, uint8_t v) { (void)dp; (void)v; }
 
 static t_frame_t fr[8];
 static uint8_t image[OTA_MAX_SIZE];
@@ -260,14 +267,18 @@ static void test_rescue_never_times_out(void)
     TEST_ASSERT_EQUAL(0, jumped);
 }
 
-static void test_record_page_never_overwritten_by_image(void)
+static void test_record_and_settings_pages_survive_largest_image(void)
 {
+    static const uint8_t marker[8] = {0x5A, 1, 2, 3, 4, 5, 6, 7};
     make_image(OTA_MAX_SIZE - FOOTER_SIZE, 9);   /* largest possible app */
+    memcpy(&flash[SETTINGS_ADDR], marker, sizeof marker);
     boot_init(0, 0);
     TEST_ASSERT_EQUAL(1, send_start(image_len));
     transfer();
     TEST_ASSERT_EQUAL(1, jumped);
     TEST_ASSERT_TRUE(boot_app_valid());
+    /* the app's settings page survives the update */
+    TEST_ASSERT_EQUAL_MEMORY(marker, &flash[SETTINGS_ADDR], sizeof marker);
 }
 
 int main(void)
@@ -284,6 +295,6 @@ int main(void)
     RUN_TEST(test_oversize_and_tiny_rejected);
     RUN_TEST(test_wait_timeout_returns_to_app);
     RUN_TEST(test_rescue_never_times_out);
-    RUN_TEST(test_record_page_never_overwritten_by_image);
+    RUN_TEST(test_record_and_settings_pages_survive_largest_image);
     return UNITY_END();
 }

@@ -6,6 +6,8 @@
  *
  *  0x0000 ......................... application code + footer (OTA image)
  *  ...                              (0xFF)
+ *  SETTINGS_ADDR                    settings log, written by the app
+ *                                   (one page, see src/app/logic.c)
  *  APP_RECORD_ADDR (last APROM page) validity record, written by the
  *                                   bootloader after a CRC-checked update
  *                                   (or by the ICP image)
@@ -24,6 +26,7 @@
 #define APROM_SIZE          (FLASH_SIZE - LDROM_SIZE)
 #define FLASH_PAGE_SIZE     128U
 #define APP_RECORD_ADDR     (APROM_SIZE - FLASH_PAGE_SIZE)
+#define SETTINGS_ADDR       (APP_RECORD_ADDR - FLASH_PAGE_SIZE)
 
 /* Footer appended to the application binary by scripts/fwimage.py.
  * All multi-byte fields little-endian. */
@@ -39,8 +42,8 @@
 #define FOOTER_FORMAT       1U
 #define RECORD_SIZE         8U      /* first 8 bytes of the footer */
 
-/* Largest OTA image (app + footer) that fits below the record page */
-#define OTA_MAX_SIZE        APP_RECORD_ADDR
+/* Largest OTA image (app + footer) that fits below the settings page */
+#define OTA_MAX_SIZE        SETTINGS_ADDR
 #define APP_MAX_CODE        (OTA_MAX_SIZE - FOOTER_SIZE)
 
 /* XRAM hand-off from app to bootloader across the software reset.
