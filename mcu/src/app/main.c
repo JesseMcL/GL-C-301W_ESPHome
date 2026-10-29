@@ -1,11 +1,9 @@
 /*
  * GL-C-301W replacement firmware for the Nuvoton MS51FC0AE (TSSOP20)
+ * Application (APROM). The MCU is a 5-channel PWM slave behind the T1-U
+ * (BK7238) running ESPHome; framing is TuyaMCU (see proto.c, tuya_dp.h).
  *
- * The MCU becomes a 5-channel PWM slave behind the T1-U (BK7238) module,
- * which runs ESPHome. Framing is TuyaMCU so ESPHome's stock `tuya:` component
- * can talk to it; see proto.h for the datapoints.
- *
- * Pin map (from the board):
+ * Pin map (reverse engineered from the board):
  *   pin 13 P1.2  PWM0_CH0  -> W driver
  *   pin 14 P1.1  PWM0_CH1  -> C driver
  *   pin 15 P1.0  PWM0_CH2  -> B driver
@@ -15,20 +13,28 @@
  *   pin  3 P0.7  UART0 RXD <- T1-U P11 (TX1)
  *   pin 18 P0.2  PB-Set (also ICP CLK)
  *   pin  4 P2.0  PB-Power/Dimmer (also nRESET)
- *   pin 10 P1.5  status LED
- *   pin 11 P1.4  aux LED
- *   pin  8 P1.6  ICP DAT + LED     -> left as input (not touched)
- *   pins 1,5,6,12,19,20            -> 2.4 GHz RF IC, left as inputs
+ *   pin  8 P1.6  red indicator LED (also ICP DAT)
+ *   pin 10 P1.5  green indicator LED
+ *   pin 11 P1.4  blue indicator LED
+ *   pins 1,5,6,12,19,20 -> 2.4 GHz RF IC, left as inputs
  *
- * Small parts of the clock-trim code follow Nuvoton's MS51 BSP (Apache-2.0).
+ * Clock-trim code follows Nuvoton's MS51 BSP (Apache-2.0).
  */
 #include "numicro_8051.h"
 #include "config.h"
+#include "layout.h"
+#include "tuya_dp.h"
 #include "proto.h"
 
 /* Globals the BSP's macros expect */
 BIT BIT_TMP;
 __data uint8_t TA_REG_TMP, BYTE_TMP, SFRS_TMP;
+
+/* App -> bootloader hand-off across the software reset (see layout.h) */
+__xdata __at(HANDOFF_XADDR)     volatile uint16_t handoff_magic;
+__xdata __at(HANDOFF_XADDR + 2) volatile uint32_t handoff_size;
+
+#define IAP_READ_CONFIG   0xC0
 
 /* ------------------------------------------------------------------ */
 /* Time base                                                          */
@@ -78,7 +84,7 @@ void UART0_ISR(void) __interrupt(4)
     if (RI) {
         RI = 0;
         n = (rxq_head + 1) & (RXQ_SIZE - 1);
-        if (n != rxq_tail) {             /* drop on overflow */
+        if (n != rxq_tail) {
             rxq[rxq_head] = SBUF;
             rxq_head = n;
         }
@@ -99,7 +105,7 @@ void hal_uart_put(uint8_t b)
 {
     uint8_t n = (txq_head + 1) & (TXQ_SIZE - 1);
     while (n == txq_tail)
-        ;                                /* wait for room (ISR drains) */
+        ;
     ES = 0;
     if (!tx_busy) {
         tx_busy = 1;
@@ -119,10 +125,10 @@ static void uart0_init(void)
     P07_INPUT_MODE;
 
     SFRS = 0;
-    SCON = 0x50;                         /* mode 1, REN */
-    set_PCON_SMOD;                       /* double rate */
-    T3CON &= 0xF8;                       /* T3 prescale 1 */
-    set_T3CON_BRCK;                      /* UART0 baud from Timer3 */
+    SCON = 0x50;
+    set_PCON_SMOD;
+    T3CON &= 0xF8;
+    set_T3CON_BRCK;
     RH3 = (uint8_t)((65536UL - (FSYS_HZ / 16UL / UART_BAUD)) >> 8);
     RL3 = (uint8_t)(65536UL - (FSYS_HZ / 16UL / UART_BAUD));
     set_T3CON_TR3;
@@ -154,6 +160,42 @@ static void hirc_24mhz(void)
     PCON &= CLR_BIT4;
 }
 
+static uint8_t read_config_byte(uint8_t idx)
+{
+    uint8_t v;
+    SFRS = 0;
+    set_CHPCON_IAPEN;
+    IAPAH = 0;
+    IAPAL = idx;
+    IAPCN = IAP_READ_CONFIG;
+    set_IAPTRG_IAPGO;
+    v = IAPFD;
+    clr_CHPCON_IAPEN;
+    return v;
+}
+
+/* ------------------------------------------------------------------ */
+/* Firmware update hand-off                                           */
+/* ------------------------------------------------------------------ */
+uint8_t app_ota_request(uint32_t size)
+{
+    /* CONFIG1.LDS: 111 = no LDROM -> nothing to reset into */
+    if ((read_config_byte(1) & 0x07) == 0x07)
+        return 0;
+    if (size == 0 || size > OTA_MAX_SIZE)
+        return 0;
+
+    handoff_size = size;
+    handoff_magic = HANDOFF_MAGIC;
+
+    EA = 0;
+    SFRS = 0;
+    TA = 0xAA; TA = 0x55; CHPCON |= 0x02;       /* BS = 1: boot LDROM */
+    TA = 0xAA; TA = 0x55; CHPCON |= 0x80;       /* SWRST */
+    for (;;)
+        ;
+}
+
 /* ------------------------------------------------------------------ */
 /* PWM + fading                                                       */
 /* ------------------------------------------------------------------ */
@@ -163,6 +205,7 @@ static __xdata int32_t  cur_fp[NUM_CH];      /* value << 8 */
 static __xdata int32_t  step_fp[NUM_CH];
 static __xdata uint16_t remain[NUM_CH];
 static __xdata uint16_t saved[NUM_CH];
+static uint16_t fade_ms = DEFAULT_FADE_MS;
 static __bit pwm_dirty;
 
 static void pwm_write_duties(uint16_t d0, uint16_t d1, uint16_t d2, uint16_t d3, uint16_t d4);
@@ -206,15 +249,8 @@ static void pwm_write_duties(uint16_t d0, uint16_t d1, uint16_t d2, uint16_t d3,
     SFRS = 0;
 }
 
-static void pwm_write_regs(void)
-{
-    pwm_write_duties(duty_of(cur[CH_W]), duty_of(cur[CH_C]), duty_of(cur[CH_B]),
-                     duty_of(cur[CH_G]), duty_of(cur[CH_R]));
-}
-
 static void pwm_init(void)
 {
-    /* Drive low first so nothing flashes while PWM is configured */
     P12 = 0; P11 = 0; P10 = 0; P00 = 0; P01 = 0;
     P12_PUSHPULL_MODE; P11_PUSHPULL_MODE; P10_PUSHPULL_MODE;
     P00_PUSHPULL_MODE; P01_PUSHPULL_MODE;
@@ -223,7 +259,7 @@ static void pwm_init(void)
     clr_CKCON_PWMCKS;                    /* PWM clock = Fsys */
     PWM0CON1 = 0x00;                     /* independent, edge-aligned, /1 */
 
-    /* Polarity: PNP bit n inverts PWM0_CHn.  Map RGBCW mask to CH bits. */
+    /* PNP bit n inverts PWM0_CHn; map the RGBCW mask onto channels */
     PNP = ((PWM_INVERT_MASK >> CH_W) & 1) << 0 |
           ((PWM_INVERT_MASK >> CH_C) & 1) << 1 |
           ((PWM_INVERT_MASK >> CH_B) & 1) << 2 |
@@ -233,7 +269,8 @@ static void pwm_init(void)
     PWM0PH = (uint8_t)(PWM_PERIOD >> 8);
     PWM0PL = (uint8_t)PWM_PERIOD;
 
-    pwm_write_regs();
+    pwm_write_duties(duty_of(cur[CH_W]), duty_of(cur[CH_C]), duty_of(cur[CH_B]),
+                     duty_of(cur[CH_G]), duty_of(cur[CH_R]));
     ENABLE_PWM0_CH0_P12_OUTPUT;
     ENABLE_PWM0_CH1_P11_OUTPUT;
     ENABLE_PWM0_CH2_P10_OUTPUT;
@@ -243,28 +280,24 @@ static void pwm_init(void)
     PWM0CON0 |= 0xC0;                    /* RUN + LOAD */
 }
 
-void app_set_channels(const uint16_t __xdata *v, uint16_t fade_ms)
+static void set_channel_fade(uint8_t ch, uint16_t v, uint16_t ms)
 {
-    uint8_t i;
-    for (i = 0; i < NUM_CH; i++) {
-        tgt[i] = v[i];
-        if (fade_ms == 0) {
-            cur[i] = v[i];
-            cur_fp[i] = (int32_t)v[i] << 8;
-            remain[i] = 0;
-        } else {
-            step_fp[i] = (((int32_t)v[i] << 8) - cur_fp[i]) / (int32_t)fade_ms;
-            remain[i] = fade_ms;
-        }
-    }
-    if (fade_ms == 0)
+    tgt[ch] = v;
+    if (ms == 0) {
+        cur[ch] = v;
+        cur_fp[ch] = (int32_t)v << 8;
+        remain[ch] = 0;
         pwm_dirty = 1;
+    } else {
+        step_fp[ch] = (((int32_t)v << 8) - cur_fp[ch]) / (int32_t)ms;
+        remain[ch] = ms;
+    }
 }
 
-uint16_t app_get_target(uint8_t ch)
-{
-    return tgt[ch];
-}
+void app_set_channel(uint8_t ch, uint16_t v) { set_channel_fade(ch, v, fade_ms); }
+uint16_t app_get_channel(uint8_t ch)          { return tgt[ch]; }
+void app_set_fade(uint16_t ms)                { fade_ms = ms; }
+uint16_t app_get_fade(void)                   { return fade_ms; }
 
 static void fade_tick(void)
 {
@@ -286,32 +319,35 @@ static void fade_tick(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Indicator LEDs                                                     */
+/* Indicator LEDs (R = P1.6, G = P1.5, B = P1.4)                      */
 /* ------------------------------------------------------------------ */
 static uint8_t led_mode = LED_MODE_AUTO;
+static uint8_t led_manual[NUM_LED];
 
-void app_set_led_mode(uint8_t m) { led_mode = m; }
-uint8_t app_get_led_mode(void)   { return led_mode; }
+void app_set_led_mode(uint8_t m)          { led_mode = m; }
+uint8_t app_get_led_mode(void)            { return led_mode; }
+void app_set_led(uint8_t led, uint8_t on) { led_manual[led] = on; }
+uint8_t app_get_led(uint8_t led)          { return led_manual[led]; }
 
-static void led_write(uint8_t on)
-{
-#if STATUS_LED_ACTIVE_LOW
-    P15 = !on;
+#if LED_ACTIVE_LOW
+#define LED_LEVEL(on) (!(on))
 #else
-    P15 = on;
+#define LED_LEVEL(on) (on)
 #endif
+
+static void leds_write(uint8_t r, uint8_t g, uint8_t b)
+{
+    P16 = LED_LEVEL(r);
+    P15 = LED_LEVEL(g);
+    P14 = LED_LEVEL(b);
 }
 
 static void leds_init(void)
 {
-#if AUX_LED_ACTIVE_LOW
-    P14 = 1;
-#else
-    P14 = 0;
-#endif
-    P14_PUSHPULL_MODE;
-    led_write(0);
+    leds_write(0, 0, 0);
+    P16_PUSHPULL_MODE;
     P15_PUSHPULL_MODE;
+    P14_PUSHPULL_MODE;
 }
 
 /* ------------------------------------------------------------------ */
@@ -321,64 +357,67 @@ typedef struct {
     uint8_t  stable;        /* 1 = pressed */
     uint8_t  cnt;
     uint16_t held;
-    uint8_t  long_sent;
 } btn_t;
 
-static btn_t btn_pwr, btn_set;
+static btn_t btns[2];
 static uint16_t link_age = 0xFFFF;     /* ms since last valid frame */
+
+uint8_t app_get_button(uint8_t b) { return btns[b].stable; }
 
 static void local_power_toggle(void)
 {
     uint8_t i, any = 0;
-    static __xdata uint16_t v[NUM_CH];
+    uint16_t v;
 
     for (i = 0; i < NUM_CH; i++)
         if (tgt[i]) any = 1;
 
     if (any) {
-        for (i = 0; i < NUM_CH; i++) { saved[i] = tgt[i]; v[i] = 0; }
-    } else {
-        any = 0;
-        for (i = 0; i < NUM_CH; i++) { v[i] = saved[i]; if (v[i]) any = 1; }
-        if (!any) {
-            v[CH_R] = LOCAL_DEFAULT_R; v[CH_G] = LOCAL_DEFAULT_G;
-            v[CH_B] = LOCAL_DEFAULT_B; v[CH_C] = LOCAL_DEFAULT_C;
-            v[CH_W] = LOCAL_DEFAULT_W;
+        for (i = 0; i < NUM_CH; i++) {
+            saved[i] = tgt[i];
+            set_channel_fade(i, 0, LOCAL_FADE_MS);
         }
+        return;
     }
-    app_set_channels(v, LOCAL_FADE_MS);
-}
-
-static void button_event(uint8_t ev)
-{
-    proto_report_button(ev);
-    if (link_age > LINK_TIMEOUT_MS && ev == BTN_EV_POWER_SHORT)
-        local_power_toggle();
+    for (i = 0; i < NUM_CH; i++)
+        if (saved[i]) any = 1;
+    for (i = 0; i < NUM_CH; i++) {
+        if (any) {
+            v = saved[i];
+        } else {
+            switch (i) {
+            case CH_R: v = LOCAL_DEFAULT_R; break;
+            case CH_G: v = LOCAL_DEFAULT_G; break;
+            case CH_B: v = LOCAL_DEFAULT_B; break;
+            case CH_C: v = LOCAL_DEFAULT_C; break;
+            default:   v = LOCAL_DEFAULT_W; break;
+            }
+        }
+        set_channel_fade(i, v, LOCAL_FADE_MS);
+    }
 }
 
 /* Called every 1 ms with the raw (active-high) pin state. */
-static void btn_tick(btn_t *b, uint8_t raw, uint8_t ev_short, uint8_t ev_long)
+static void btn_tick(uint8_t idx, uint8_t raw)
 {
+    btn_t *b = &btns[idx];
     if (raw != b->stable) {
         if (++b->cnt >= BTN_DEBOUNCE_MS) {
             b->stable = raw;
             b->cnt = 0;
+            proto_report_button(idx);
             if (raw) {
                 b->held = 0;
-                b->long_sent = 0;
-            } else if (!b->long_sent) {
-                button_event(ev_short);
+            } else if (b->held < BTN_LONG_MS && idx == BTN_POWER &&
+                       link_age > LINK_TIMEOUT_MS) {
+                local_power_toggle();          /* ESPHome unreachable */
             }
         }
     } else {
         b->cnt = 0;
     }
-    if (b->stable && !b->long_sent) {
-        if (++b->held >= BTN_LONG_MS) {
-            b->long_sent = 1;
-            button_event(ev_long);
-        }
-    }
+    if (b->stable && b->held < 0xFFFF)
+        b->held++;
 }
 
 static void buttons_init(void)
@@ -386,8 +425,6 @@ static void buttons_init(void)
     P02 = 1;
     P02_QUASI_MODE;                      /* weak pull-up */
     /* P2.0 is input-only; external pull-up on the board */
-    btn_pwr.stable = 0;
-    btn_set.stable = 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -401,33 +438,31 @@ static void wdt_init(void)
     EA = BIT_TMP;
 }
 
-static void wdt_kick(void)
-{
-    set_WDCON_WDCLR;
-}
-
 /* ------------------------------------------------------------------ */
 void main(void)
 {
     uint16_t now, led_phase = 0;
-    uint8_t  wdt_cnt = 0, b, on;
-    static __xdata uint16_t boot[NUM_CH];
+    uint8_t  wdt_cnt = 0, b, r, g, bl;
+
+    clr_AUXR1_SWRF;                      /* see bootloader: SWRF = OTA request */
+    handoff_magic = 0;
 
     hirc_24mhz();
     wdt_init();
+
+    cur[CH_R] = BOOT_LEVEL_R; cur[CH_G] = BOOT_LEVEL_G; cur[CH_B] = BOOT_LEVEL_B;
+    cur[CH_C] = BOOT_LEVEL_C; cur[CH_W] = BOOT_LEVEL_W;
+    for (b = 0; b < NUM_CH; b++) {
+        tgt[b] = cur[b];
+        cur_fp[b] = (int32_t)cur[b] << 8;
+    }
     pwm_init();
     leds_init();
     buttons_init();
 
-    boot[CH_R] = BOOT_LEVEL_R; boot[CH_G] = BOOT_LEVEL_G;
-    boot[CH_B] = BOOT_LEVEL_B; boot[CH_C] = BOOT_LEVEL_C;
-    boot[CH_W] = BOOT_LEVEL_W;
-    app_set_channels(boot, 0);
-
     proto_init();
     uart0_init();
 
-    /* Timer0: mode 1, Fsys/12, 1 ms */
     SFRS = 0;
     TMOD = (TMOD & 0xF0) | 0x01;
     clr_CKCON_T0M;
@@ -438,7 +473,6 @@ void main(void)
     EA = 1;
 
     for (;;) {
-        /* Drain received bytes into the protocol parser */
         now = millis16();
         while (rxq_tail != rxq_head) {
             b = rxq[rxq_tail];
@@ -462,29 +496,28 @@ void main(void)
             if (link_age < 0xFFFF)
                 link_age++;
 
-            btn_tick(&btn_set, !P02, BTN_EV_SET_SHORT, BTN_EV_SET_LONG);
-            btn_tick(&btn_pwr, !P20, BTN_EV_POWER_SHORT, BTN_EV_POWER_LONG);
+            btn_tick(BTN_SET, !P02);
+            btn_tick(BTN_POWER, !P20);
 
-            /* Status LED */
+            /* Indicator */
             led_phase++;
-            if (led_mode == LED_MODE_ON) {
-                on = 1;
-            } else if (led_mode == LED_MODE_OFF) {
-                on = 0;
-            } else if (link_age > LINK_TIMEOUT_MS) {
-                on = (led_phase & 0x7FF) < 100;          /* short blip / 2 s */
-            } else if (proto_wifi_state <= 0x01) {
-                on = (led_phase & 0x80) != 0;            /* ~4 Hz: pairing */
-            } else if (proto_wifi_state == 0x02 || proto_wifi_state == WIFI_UNKNOWN) {
-                on = (led_phase & 0x200) != 0;           /* ~1 Hz: no Wi-Fi */
+            if (led_mode == LED_MODE_MANUAL) {
+                r = led_manual[LED_R]; g = led_manual[LED_G]; bl = led_manual[LED_B];
             } else {
-                on = 0;                                  /* connected */
+                r = g = bl = 0;
+                if (link_age > LINK_TIMEOUT_MS)
+                    r = (led_phase & 0x7FF) < 100;           /* red blip / 2 s */
+                else if (proto_wifi_state <= 0x01)
+                    bl = (led_phase & 0x80) != 0;            /* blue ~4 Hz: pairing/AP */
+                else if (proto_wifi_state == 0x02 || proto_wifi_state == WIFI_UNKNOWN)
+                    g = (led_phase & 0x200) != 0;            /* green ~1 Hz: no Wi-Fi */
+                /* connected: dark */
             }
-            led_write(on);
+            leds_write(r, g, bl);
 
             if (++wdt_cnt >= WDT_KICK_MS) {
                 wdt_cnt = 0;
-                wdt_kick();
+                set_WDCON_WDCLR;
             }
         }
 

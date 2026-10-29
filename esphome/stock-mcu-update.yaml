@@ -1,0 +1,97 @@
+# EXPERIMENT: flash this repo's MCU firmware onto a *stock* Gledopto MS51
+# through the stock firmware's own Tuya MCU upgrade (0x0A / 0x0B), i.e.
+# without catching the chip with ICP at power-on.
+#
+# The light is driven with the stock datapoints so the controller stays usable
+# while you try. The MCU firmware update entity shows "installable" because
+# the stock MCU doesn't report DP 120 (version unknown).
+#
+#  1. Flash this to the T1-U. Watch the log (VERBOSE for tuya + tuya_mcu).
+#     If "MCU restarted" never appears, the stock MCU isn't at 9600: try 115200.
+#  2. Press Install on "MCU firmware". Look for "MCU accepted update" and the
+#     packet size the stock MCU asked for.
+#  3. Success = the MCU reboots into the new firmware, which talks 115200, so
+#     this config loses it ("did not report the new version" is expected at
+#     9600). Flash bathroom-mirror-1.yaml and it should report the version on
+#     DP 120.
+#
+# If the stock updater rejects or mangles the image, the MCU may be left
+# without a working app: recover with ICP (mcu/: pio run -e app -t provision).
+
+substitutions:
+  name: bathroom-mirror-1
+  friendly_name: Bathroom Mirror
+  stock_mcu_baud: "9600"
+  mcu_firmware: https://github.com/JesseMcL/GL-C-301W_ESPHome/releases/latest/download/manifest.json
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [tuya_mcu]
+
+bk72xx:
+  board: t1-u
+
+logger:
+  baud_rate: 0
+  level: VERBOSE
+  logs:
+    tuya: VERBOSE
+    tuya_mcu.update: VERBOSE
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    encryption: {}
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+uart:
+  id: mcu_uart
+  tx_pin: P11
+  rx_pin: P10
+  baud_rate: ${stock_mcu_baud}
+
+tuya:
+  id: mcu
+  uart_id: mcu_uart
+
+# Stock Gledopto datapoints (from the Tuya cloud schema of this device):
+#   20 switch_led bool, 21 work_mode enum, 22 bright_value 10..1000,
+#   23 temp_value 0..1000, 24 colour_data HSV hex string
+light:
+  - platform: tuya
+    name: Light
+    switch_datapoint: 20
+    dimmer_datapoint: 22
+    min_value: 10
+    max_value: 1000
+    color_temperature_datapoint: 23
+    color_temperature_max_value: 1000
+    cold_white_color_temperature: 6500 K
+    warm_white_color_temperature: 2700 K
+
+update:
+  - platform: tuya_mcu
+    id: mcu_update
+    name: MCU firmware
+    tuya_id: mcu
+    uart_id: mcu_uart
+    source: ${mcu_firmware}
+    # stock firmware may be slow to answer while it erases flash
+    start_timeout: 15s
+    packet_timeout: 10s

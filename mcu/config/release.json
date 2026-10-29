@@ -1,0 +1,4 @@
+{
+  "_comment": "Release CONFIG: as dev, plus P2.0 as GPIO (power button works, ICP needs power-on entry) and WDT reset enabled (stops in idle). CONFIG0=0x7B CONFIG1=0xFC CONFIG4=0x5F",
+  "config_bytes": [123, 252, 255, 255, 95]
+}

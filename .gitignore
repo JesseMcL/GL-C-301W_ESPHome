@@ -1,6 +1,10 @@
-mcu/bsp/
-mcu/build/*
-!mcu/build/gl_c_301w_ms51.hex
-!mcu/build/gl_c_301w_ms51.bin
-esphome/.esphome/
+# PlatformIO / MCU build
+mcu/.pio/
+mcu/.bsp/
+mcu/dist/
+# ESPHome
+**/.esphome/
 esphome/secrets.yaml
+# misc
+__pycache__/
+*.pyc

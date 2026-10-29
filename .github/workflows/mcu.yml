@@ -1,0 +1,74 @@
+name: MCU firmware
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # git describe for dev versions
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            mcu/.bsp
+          key: pio-${{ runner.os }}-${{ hashFiles('mcu/platformio.ini', 'mcu/scripts/bsp.py') }}
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Release version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          if [ ${#v} -gt 15 ]; then echo "version '$v' longer than 15 chars"; exit 1; fi
+          echo "FW_VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: Unit tests (host)
+        run: pio test -d mcu -e native
+
+      - name: Build app + bootloader
+        run: pio run -d mcu
+
+      - name: Release manifest
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          python mcu/scripts/fwimage.py manifest \
+            --version "$FW_VERSION" \
+            --ota "mcu/dist/gl-c-301w-mcu-$FW_VERSION.ota.bin" \
+            --release-url "https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}" \
+            --summary "GL-C-301W MS51FC0AE firmware ${{ github.ref_name }}" \
+            -o mcu/dist/manifest.json
+
+      - name: Add ICP helpers
+        run: |
+          cp mcu/config/dev.json mcu/dist/config-dev.json
+          cp mcu/config/release.json mcu/dist/config-release.json
+          cp mcu/scripts/pi_flash.py mcu/dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gl-c-301w-mcu
+          path: mcu/dist/
+
+      - name: GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: mcu/dist/*

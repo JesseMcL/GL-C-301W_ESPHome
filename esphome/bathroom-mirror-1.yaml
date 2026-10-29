@@ -1,39 +1,49 @@
-# Gledopto GL-C-301W (T1-U-HL / BK7238 + MS51FC0AE running gl_c_301w_ms51)
+# Gledopto GL-C-301W - T1-U-HL (BK7238) running ESPHome, talking TuyaMCU to
+# the MS51FC0AE running this repo's firmware (mcu/).
 #
-# The MS51 is a 5-channel PWM slave speaking TuyaMCU framing at 115200 baud:
-#   DP 101 raw   R,G,B,C,W as uint16 BE (0..65535) + uint16 fade ms
-#   DP 102 enum  button event: 1 power short, 2 power long, 3 set short, 4 set long
-#   DP 103 enum  status LED: 0 auto (Wi-Fi state), 1 off, 2 on
-# ESPHome does all light logic (gamma, transitions, colour temperature). The
-# outputs are batched into one DP 101 frame every 50 ms and the MCU fades
-# linearly between frames, so transitions stay smooth.
+# MCU datapoints (mcu/include/tuya_dp.h):
+#   101..105 R,G,B,C,W duty   value 0..65535   rw
+#   106      fade ms          value 0..10000   rw
+#   107      power button     bool             ro
+#   108      set button       bool             ro
+#   109      status LED mode  enum 0 auto 1 manual
+#   110..112 red/green/blue status LED  bool   rw
+#   120      firmware version string           ro
 
 substitutions:
   name: bathroom-mirror-1
   friendly_name: Bathroom Mirror
+  # 115200 for this repo's MCU firmware. The stock Gledopto MCU firmware
+  # probably talks 9600 - use that to try the update on a stock MCU.
+  mcu_baud: "115200"
+  # Release manifest the MCU firmware is bundled from at compile time.
+  # Before the first GitHub release exists, point this at a local build:
+  #   ../mcu/dist/manifest.json
+  mcu_firmware: https://github.com/JesseMcL/GL-C-301W_ESPHome/releases/latest/download/manifest.json
 
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
-  on_boot:
-    priority: 600
-    then:
-      - lambda: |-
-          // MCU (re)started or link (re)established: push current levels
-          id(mcu).add_on_initialized_callback([]() {
-            id(ch_dirty) = true;
-            auto idx = id(led_select).active_index();
-            if (idx.has_value())
-              id(mcu).force_set_enum_datapoint_value(103, *idx);
-          });
+  project:
+    name: jessemcl.gl-c-301w
+    version: "1.0"
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [tuya_mcu]
+  # once the repo is on GitHub, this works from anywhere:
+  # - source: github://JesseMcL/GL-C-301W_ESPHome/esphome/components@main
+  #   components: [tuya_mcu]
 
 bk72xx:
   board: t1-u
 
 logger:
-  baud_rate: 0          # UART1 (P10/P11) is the MCU link
+  baud_rate: 0          # UART1 (P10/P11) belongs to the MCU
   logs:
-    tuya: INFO          # DP 101 is sent up to 20x/s during transitions
+    tuya: INFO          # channel writes would otherwise flood DEBUG
 
 api:
   encryption:
@@ -55,97 +65,22 @@ uart:
   id: mcu_uart
   tx_pin: P11           # T1 pin 15 -> MCU pin 3 (UART0 RXD)
   rx_pin: P10           # T1 pin 16 <- MCU pin 2 (UART0 TXD)
-  baud_rate: 115200     # must match UART_BAUD in mcu/src/config.h
+  baud_rate: ${mcu_baud}
 
 tuya:
   id: mcu
   uart_id: mcu_uart
-  on_datapoint_update:
-    - sensor_datapoint: 102
-      datapoint_type: enum
-      then:
-        - lambda: |-
-            switch (x) {
-              case 1: id(btn_event).trigger("power_short"); break;
-              case 2: id(btn_event).trigger("power_long");  break;
-              case 3: id(btn_event).trigger("set_short");   break;
-              case 4: id(btn_event).trigger("set_long");    break;
-              default: return;   // 0 = "no event" in the initial DP dump
-            }
-            auto *light = id(mirror);
-            if (x == 1) {
-              light->toggle().perform();
-            } else if (x == 2) {
-              // power long-press: toggle between full and night level
-              auto call = light->turn_on();
-              float b = light->remote_values.get_brightness();
-              call.set_brightness(b > 0.5f ? 0.15f : 1.0f);
-              call.perform();
-            } else if (x == 3) {
-              // set short-press: cycle warm / neutral / cool
-              static const float mireds[] = {370.0f, 250.0f, 166.0f};
-              static uint8_t idx = 0;
-              idx = (idx + 1) % 3;
-              auto call = light->turn_on();
-              call.set_color_temperature(mireds[idx]);
-              call.perform();
-            }
 
-globals:
-  - id: ch_vals          # R, G, B, C, W  (0..65535)
-    type: std::array<uint16_t, 5>
-    restore_value: no
-  - id: ch_dirty
-    type: bool
-    restore_value: no
-    initial_value: "false"
-
+# ---- LED driver channels ----------------------------------------------------
 output:
-  - platform: template
-    id: out_r
-    type: float
-    write_action:
-      - lambda: id(ch_vals)[0] = (uint16_t) lroundf(state * 65535.0f); id(ch_dirty) = true;
-  - platform: template
-    id: out_g
-    type: float
-    write_action:
-      - lambda: id(ch_vals)[1] = (uint16_t) lroundf(state * 65535.0f); id(ch_dirty) = true;
-  - platform: template
-    id: out_b
-    type: float
-    write_action:
-      - lambda: id(ch_vals)[2] = (uint16_t) lroundf(state * 65535.0f); id(ch_dirty) = true;
-  - platform: template
-    id: out_c
-    type: float
-    write_action:
-      - lambda: id(ch_vals)[3] = (uint16_t) lroundf(state * 65535.0f); id(ch_dirty) = true;
-  - platform: template
-    id: out_w
-    type: float
-    write_action:
-      - lambda: id(ch_vals)[4] = (uint16_t) lroundf(state * 65535.0f); id(ch_dirty) = true;
-
-interval:
-  - interval: 50ms
-    then:
-      - lambda: |-
-          if (!id(ch_dirty)) return;
-          if (id(mcu).get_init_state() != tuya::TuyaInitState::INIT_DONE) return;
-          id(ch_dirty) = false;
-          std::vector<uint8_t> d;
-          d.reserve(12);
-          for (uint16_t v : id(ch_vals)) {
-            d.push_back(v >> 8);
-            d.push_back(v & 0xFF);
-          }
-          d.push_back(0);
-          d.push_back(50);       // MCU fades over one interval
-          id(mcu).force_set_raw_datapoint_value(101, d);
+  - { platform: tuya_mcu, id: out_r, datapoint: 101 }
+  - { platform: tuya_mcu, id: out_g, datapoint: 102 }
+  - { platform: tuya_mcu, id: out_b, datapoint: 103 }
+  - { platform: tuya_mcu, id: out_c, datapoint: 104 }
+  - { platform: tuya_mcu, id: out_w, datapoint: 105 }
 
 light:
-  # CCT mirror strip (warm + cool white on the W and C channels).
+  # CCT mirror strip on the C and W channels
   - platform: cwww
     id: mirror
     name: Light
@@ -158,7 +93,7 @@ light:
     gamma_correct: 2.8
     restore_mode: RESTORE_DEFAULT_OFF
 
-  # For an RGB+CCT strip use this instead of the cwww light above:
+  # RGB+CCT strip: use this instead
   # - platform: rgbww
   #   id: mirror
   #   name: Light
@@ -174,34 +109,88 @@ light:
   #   default_transition_length: 400ms
   #   restore_mode: RESTORE_DEFAULT_OFF
 
-event:
-  - platform: template
-    id: btn_event
-    name: Button
-    event_types: [power_short, power_long, set_short, set_long]
-
-select:
-  - platform: template
-    id: led_select
-    name: Status LED
+number:
+  - platform: tuya
+    name: Channel smoothing
+    number_datapoint: 106
+    min_value: 0
+    max_value: 1000
+    step: 10
+    unit_of_measurement: ms
+    mode: box
     entity_category: config
-    options: [Auto, "Off", "On"]
-    initial_option: Auto
-    optimistic: true
-    restore_value: true
-    set_action:
-      - lambda: |-
-          uint8_t m = (x == "Off") ? 1 : (x == "On") ? 2 : 0;
-          id(mcu).force_set_enum_datapoint_value(103, m);
+
+# ---- Buttons on the controller ---------------------------------------------
+binary_sensor:
+  - platform: tuya
+    id: btn_power
+    name: Power button
+    sensor_datapoint: 107
+    on_multi_click:
+      - timing: [ON for at most 600ms, OFF for at least 50ms]
+        then:
+          - light.toggle: mirror
+      - timing: [ON for at least 800ms]
+        then:
+          - lambda: |-
+              // long press: switch between full and night level
+              auto *l = id(mirror);
+              auto call = l->turn_on();
+              call.set_brightness(l->remote_values.get_brightness() > 0.5f ? 0.15f : 1.0f);
+              call.perform();
+
+  - platform: tuya
+    id: btn_set
+    name: Set button
+    sensor_datapoint: 108
+    on_click:
+      max_length: 600ms
+      then:
+        - lambda: |-
+            // cycle warm / neutral / cool
+            static const float mireds[] = {370.0f, 250.0f, 166.0f};
+            static uint8_t idx = 0;
+            idx = (idx + 1) % 3;
+            auto call = id(mirror).turn_on();
+            call.set_color_temperature(mireds[idx]);
+            call.perform();
+
+# ---- RGB status LED on the controller ---------------------------------------
+select:
+  - platform: tuya
+    name: Status LED mode
+    enum_datapoint: 109
+    options:
+      0: Auto
+      1: Manual
+    entity_category: config
+
+switch:
+  - { platform: tuya, name: Status LED red,   switch_datapoint: 110, entity_category: config }
+  - { platform: tuya, name: Status LED green, switch_datapoint: 111, entity_category: config }
+  - { platform: tuya, name: Status LED blue,  switch_datapoint: 112, entity_category: config }
+
+# ---- MCU firmware -------------------------------------------------------------
+text_sensor:
+  - platform: tuya
+    name: MCU firmware version
+    sensor_datapoint: 120
+    entity_category: diagnostic
+  - platform: version
+    name: ESPHome version
+
+update:
+  - platform: tuya_mcu
+    id: mcu_update
+    name: MCU firmware
+    tuya_id: mcu
+    uart_id: mcu_uart
+    source: ${mcu_firmware}
 
 sensor:
   - platform: wifi_signal
     name: Wi-Fi signal
     update_interval: 60s
-
-text_sensor:
-  - platform: version
-    name: ESPHome version
 
 button:
   - platform: restart

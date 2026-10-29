@@ -1,0 +1,4 @@
+{
+  "_comment": "Development CONFIG: boot from LDROM (3 KB bootloader), reset pin enabled (ICP-friendly), unlocked, BOD default, WDT off. CONFIG0=0x7F CONFIG1=0xFC",
+  "config_bytes": [127, 252, 255, 255, 255]
+}

@@ -1,0 +1,49 @@
+name: ESPHome
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            mcu/.bsp
+            esphome/.esphome/platformio
+          key: esphome-${{ runner.os }}-${{ hashFiles('esphome/*.yaml', 'mcu/platformio.ini') }}
+
+      - name: Install ESPHome + PlatformIO
+        run: pip install --upgrade esphome platformio
+
+      # Bundle the MCU firmware built from this commit, so the ESPHome build
+      # doesn't depend on a published release.
+      - name: Build MCU firmware
+        run: pio run -d mcu
+
+      - name: Dummy secrets
+        working-directory: esphome
+        run: |
+          cp secrets.example.yaml secrets.yaml
+          sed -i "s|REPLACE_WITH_32_BYTE_BASE64_KEY_xxxxxxxxxxx=|$(openssl rand -base64 32)|" secrets.yaml
+
+      - name: Validate
+        working-directory: esphome
+        run: esphome -s mcu_firmware ../mcu/dist/manifest.json config bathroom-mirror-1.yaml
+
+      - name: Compile (BK7238)
+        working-directory: esphome
+        run: esphome -s mcu_firmware ../mcu/dist/manifest.json compile bathroom-mirror-1.yaml
