@@ -2,7 +2,7 @@
 
   make_host_yaml.py SRC DST [OUTPUT_COMPONENTS_DIR [DFU_COMPONENTS_DIR]]
 
-*_COMPONENTS_DIR: the components/ directory of a local esphome_tuya_mcu_output
+*_COMPONENTS_DIR: the components/ directory of a local esphome_tuya_output
 / esphome_tuya_mcu_dfu checkout; empty or left out = GitHub, as in the device
 YAML.
 
@@ -38,7 +38,7 @@ host:
 
 external_components:
   - source: %(output)s
-    components: [tuya_mcu_output]
+    components: [tuya_output]
   - source: %(dfu)s
     components: [tuya_mcu_dfu]
 
@@ -92,7 +92,7 @@ def main(src, dst, output=None, dfu=None):
             text = re.sub(r"(?m)^  (tx|rx)_pin: .*\n", "", text)
             text = text.replace("  id: mcu_uart\n", "  id: mcu_uart\n  port: /tmp/esptty\n")
         res.append(text)
-    res.append(TAIL % {"output": source(output, "esphome_tuya_mcu_output"),
+    res.append(TAIL % {"output": source(output, "esphome_tuya_output"),
                        "dfu": source(dfu, "esphome_tuya_mcu_dfu")})
     open(dst, "w").write("".join(res))
 

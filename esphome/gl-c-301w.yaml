@@ -38,9 +38,9 @@ esphome:
   friendly_name: ${friendly_name}
 
 external_components:
-  # paced datapoint outputs: https://github.com/JesseMcL/esphome_tuya_mcu_output
-  - source: github://JesseMcL/esphome_tuya_mcu_output@main
-    components: [tuya_mcu_output]
+  # paced datapoint outputs: https://github.com/JesseMcL/esphome_tuya_output
+  - source: github://JesseMcL/esphome_tuya_output@main
+    components: [tuya_output]
   # MCU firmware update: https://github.com/JesseMcL/esphome_tuya_mcu_dfu
   - source: github://JesseMcL/esphome_tuya_mcu_dfu@main
     components: [tuya_mcu_dfu]
@@ -81,11 +81,11 @@ tuya:
 
 # ---- LED driver channels ----------------------------------------------------
 output:
-  - { platform: tuya_mcu_output, id: out_r, datapoint: 101, min_power: "${min_power}", zero_means_zero: true }
-  - { platform: tuya_mcu_output, id: out_g, datapoint: 102, min_power: "${min_power}", zero_means_zero: true }
-  - { platform: tuya_mcu_output, id: out_b, datapoint: 103, min_power: "${min_power}", zero_means_zero: true }
-  - { platform: tuya_mcu_output, id: out_c, datapoint: 104, min_power: "${min_power}", zero_means_zero: true }
-  - { platform: tuya_mcu_output, id: out_w, datapoint: 105, min_power: "${min_power}", zero_means_zero: true }
+  - { platform: tuya_output, id: out_r, output_datapoint: 101, min_power: "${min_power}", zero_means_zero: true }
+  - { platform: tuya_output, id: out_g, output_datapoint: 102, min_power: "${min_power}", zero_means_zero: true }
+  - { platform: tuya_output, id: out_b, output_datapoint: 103, min_power: "${min_power}", zero_means_zero: true }
+  - { platform: tuya_output, id: out_c, output_datapoint: 104, min_power: "${min_power}", zero_means_zero: true }
+  - { platform: tuya_output, id: out_w, output_datapoint: 105, min_power: "${min_power}", zero_means_zero: true }
 
 # RGB+CCT strip. For other strips swap the platform, keep id: rgbcw_light
 # (the button scripts use it) and leave unused outputs out:

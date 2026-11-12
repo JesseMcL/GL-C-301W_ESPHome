@@ -20,7 +20,7 @@ cc -O1 -DPROTO_VERSION_HOOK -I"$ROOT/mcu/include" -I"$ROOT/mcu/src/boot" -o "$WO
 socat pty,raw,echo=0,link=/tmp/esptty pty,raw,echo=0,link=/tmp/mcutty &
 sleep 1
 # External components: local checkouts in OUTPUT_DIR / DFU_DIR if set
-# (esphome_tuya_mcu_output / esphome_tuya_mcu_dfu), else GitHub
+# (esphome_tuya_output / esphome_tuya_mcu_dfu), else GitHub
 components() { if [ -n "${1:-}" ] && [ -d "$1/components" ]; then (cd "$1/components" && pwd); fi; }
 python3 make_host_yaml.py ../gl-c-301w.yaml host-integration.yaml \
   "$(components "${OUTPUT_DIR:-}")" "$(components "${DFU_DIR:-}")"
